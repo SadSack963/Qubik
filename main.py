@@ -588,15 +588,15 @@ class CubeViewer:
     def handle_input(self):
         keys = pygame.key.get_pressed()
 
-        # Mode Switching (M key)
-        if keys[pygame.K_m] and not hasattr(self, '_m_key_pressed'):
+        # Mode Switching (m key) - only if game over
+        if keys[pygame.K_m] and not hasattr(self, '_m_key_pressed') and self.game_over:
             self.toggle_mode()
             self._m_key_pressed = True
         elif not keys[pygame.K_m]:
             if hasattr(self, '_m_key_pressed'):
                 del self._m_key_pressed
 
-        # Camera Controls (Unchanged)
+        # Camera Controls (cursor keys)
         if keys[pygame.K_LEFT]:
             self.angle_y -= ROTATION_SPEED
         elif keys[pygame.K_RIGHT]:
@@ -607,6 +607,7 @@ class CubeViewer:
         elif keys[pygame.K_DOWN]:
             self.angle_x += ROTATION_SPEED
 
+        # Pan (w / a / s / d keys)
         if keys[pygame.K_a]:
             self.pan_x -= PAN_SPEED
         elif keys[pygame.K_d]:
@@ -616,17 +617,17 @@ class CubeViewer:
         elif keys[pygame.K_s]:
             self.pan_y += PAN_SPEED
 
-        # Zoom Controls (Unchanged)
+        # Zoom Controls (z / Z keys)
         if keys[pygame.K_z]:
             modifiers = pygame.key.get_mods()
             if modifiers & pygame.KMOD_SHIFT:
                 self.zoom_level *= ZOOM_STEP
             else:
                 self.zoom_level *= ZOOM_IN_FACTOR
-
+        # Limit zoom levels
         self.zoom_level = max(0.5, min(self.zoom_level, 3.0))
 
-        # Reset (Unchanged)
+        # Reset (r key) - only if game over
         if keys[pygame.K_r] and self.game_over:
             self.reset_game()
 
