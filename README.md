@@ -21,5 +21,5 @@ The rules are simple - get four of your pieces in a line before your opponent do
 
 **_Enjoy_**
 
-![](images/Qubik_demo.gif)
+![Demo](./images/Qubik_demo.gif)
 
