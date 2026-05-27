@@ -719,6 +719,7 @@ class CubeViewer:
 
     def run(self):
         running = True
+        font_win = pygame.font.SysFont("Arial", 32, bold=True)
         font_hud = pygame.font.SysFont("Arial", 20, bold=True)
         small_font = pygame.font.SysFont("Arial", 16, bold=False)
 
@@ -901,15 +902,20 @@ class CubeViewer:
             # Game Over Message
             if self.game_over:
                 if self.winner == "Draw":
-                    msg_text = font_hud.render("GAME OVER: IT'S A DRAW!", True, (255, 255, 255))
+                    msg_text = font_win.render("GAME OVER: IT'S A DRAW!", True, (255, 255, 255))
                 else:
-                    winner_name = "You!" if self.winner == 1 else "AI Wins!"
+                    winner_name = "Player 1 Wins!" if self.winner == 1 else \
+                        "AI Wins!" if self.mode == 'PvAI' else "Player 2 Wins!"
                     win_color = COLORS['p1_color'] if self.winner == 1 else (80, 140, 255)
-                    msg_text = font_hud.render(f"{winner_name}", True, win_color)
+                    msg_text = font_win.render(f"{winner_name}", True, win_color)
 
                 rect_win = msg_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 80))
-                final_str = "GAME OVER: IT'S A DRAW!" if self.winner == "Draw" else f"You Win!" if self.winner == 1 else "AI Wins!"
-                shadow_surface = font_hud.render(final_str, True, (0, 0, 0))
+
+                # Shadow text offset by 4 pixels
+                final_str = "GAME OVER: IT'S A DRAW!" if self.winner == "Draw" else \
+                    "Player 1 Wins!" if self.winner == 1 else \
+                    "AI Wins!" if self.mode == 'PvAI' else "Player 2 Wins!"
+                shadow_surface = font_win.render(final_str, True, (0, 0, 0))
                 shadow_rect = shadow_surface.get_rect(center=(WIDTH // 2 + 4, HEIGHT // 2 - 80 + 4))
                 self.screen.blit(shadow_surface, shadow_rect)
                 self.screen.blit(msg_text, rect_win)
