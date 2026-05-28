@@ -1,18 +1,11 @@
 """
 Author: SadSack963
-Version: 0.11
-Date: 27/05/2026
+Version: 0.12
+Date: 29/05/2026
 
 Requirements: Tested with Python 3.14
 Packages: pip install pygame-ce numpy
 Tools used: LM Studio using LLM qwen3-coder-next
-
-This version works well for Player 1, Player 2 and AI.
-
-Known issues:
-1.  All player pieces flash when there is a winning line.
-    Only the 4 pieces that make up the winning move should flash.
-2.  Code could do with some tidying up (!) but it works :)
 """
 
 import pygame
@@ -86,6 +79,7 @@ class CubeViewer:
         self.winner = None  # 1, 2, or "Draw"
         self.flash_timer = 0  # For the winning flash effect
         self.flash_phase = True  # True = White, False = Original Color
+        self.winning_line_coords = []  # ✅ Store winning coords here
 
         # AI State
         self.aiThinking = False
@@ -374,15 +368,20 @@ class CubeViewer:
         return np.array([self.pan_x + iso_x * self.zoom_level,
                          self.pan_y - iso_y * self.zoom_level], dtype=float)
 
-    def draw_player_piece(self, center_2d, player_num):
+    def draw_player_piece(self, center_2d, player_num, override_color=None):
         char = 'X' if player_num == 1 else 'O'
 
-        # Check for flash effect
-        if self.game_over and (self.winner == player_num) and self.flash_timer > 0:
-            color = COLORS['flash_active'] if self.flash_phase else (
-                COLORS['p1_color'] if player_num == 1 else COLORS['p2_color'])
+        # Use provided color if given; otherwise compute it as before (fallback)
+        if override_color is not None:
+            color = override_color
         else:
-            color = COLORS['p1_color'] if player_num == 1 else COLORS['p2_color']
+            # Default behavior: only flash all for winner → we'll avoid this now by always passing
+            if self.game_over and (self.winner == player_num) and self.flash_timer > 0:
+                color = COLORS['flash_active'] if self.flash_phase else (
+                    COLORS['p1_color'] if player_num == 1 else COLORS['p2_color']
+                )
+            else:
+                color = COLORS['p1_color'] if player_num == 1 else COLORS['p2_color']
 
         base_size = int(CUBE_SIZE * 0.85 * self.zoom_level)
         font_size = max(32, base_size)
@@ -426,15 +425,21 @@ class CubeViewer:
             state = self.grid_state[cube['key']]
             center_2d = self.project(pos)
 
-            # Check for flash effect first
-            if self.game_over and (self.winner == state['player']) and self.flash_timer > 0:
-                color = COLORS['flash_active'] if self.flash_phase else (
-                    COLORS['p1_color'] if state['player'] == 1 else COLORS['p2_color']
-                )
+            # ✅ Determine color based on flash and winning line
+            is_winning_cube = (
+                    self.game_over and
+                    self.flash_timer > 0 and
+                    cube['grid_idx'] in self.winning_line_coords
+            )
+
+            if is_winning_cube:
+                base_color = COLORS['p1_color'] if state['player'] == 1 else COLORS['p2_color']
+                color = COLORS['flash_active'] if self.flash_phase else base_color
             else:
                 color = COLORS['p1_color'] if state['player'] == 1 else COLORS['p2_color']
 
-            self.draw_player_piece(center_2d, state['player'])
+            # ✅ Pass `color` explicitly (override default behavior)
+            self.draw_player_piece(center_2d, state['player'], override_color=color)
 
         else:
             # It's an empty cell
@@ -538,52 +543,10 @@ class CubeViewer:
                     break
 
             if len(line_points) >= 4:
+                # ✅ Store and return the exact winning coordinates
+                self.winning_line_coords = tuple(sorted(line_points))
                 return p
         return 0
-
-    # def handle_input(self):
-    #     keys = pygame.key.get_pressed()
-    #
-    #     # Mode Switching (M key)
-    #     if keys[pygame.K_m] and not hasattr(self, '_m_key_pressed'):
-    #         self.toggle_mode()
-    #         self._m_key_pressed = True
-    #     elif not keys[pygame.K_m]:
-    #         if hasattr(self, '_m_key_pressed'):
-    #             del self._m_key_pressed
-    #
-    #     # Camera Controls
-    #     if keys[pygame.K_LEFT]:
-    #         self.angle_y -= ROTATION_SPEED
-    #     elif keys[pygame.K_RIGHT]:
-    #         self.angle_y += ROTATION_SPEED
-    #
-    #     if keys[pygame.K_UP]:
-    #         self.angle_x -= ROTATION_SPEED
-    #     elif keys[pygame.K_DOWN]:
-    #         self.angle_x += ROTATION_SPEED
-    #
-    #     if keys[pygame.K_a]:
-    #         self.pan_x -= PAN_SPEED
-    #     elif keys[pygame.K_d]:
-    #         self.pan_x += PAN_SPEED
-    #     elif keys[pygame.K_w]:
-    #         self.pan_y -= PAN_SPEED
-    #     elif keys[pygame.K_s]:
-    #         self.pan_y += PAN_SPEED
-    #
-    #     # Zoom Controls
-    #     if keys[pygame.K_z]:
-    #         modifiers = pygame.key.get_mods()
-    #         if modifiers & pygame.KMOD_SHIFT:
-    #             self.zoom_level *= ZOOM_STEP
-    #         else:
-    #             self.zoom_level *= ZOOM_IN_FACTOR
-    #
-    #     self.zoom_level = max(0.5, min(self.zoom_level, 3.0))
-    #
-    #     # Reset
-    #     if keys[pygame.K_r] and self.game_over: self.reset_game()
 
     def handle_input(self):
         keys = pygame.key.get_pressed()
@@ -717,6 +680,7 @@ class CubeViewer:
         self.winner = None
         self.flash_timer = 0
         self.aiThinking = False
+        self.winning_line_coords = []  # ✅ Reset winning line coords
 
     def run(self):
         running = True
