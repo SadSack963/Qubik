@@ -1,6 +1,6 @@
 """
 Author: SadSack963
-Version: 0.12
+Version: 0.13
 Date: 29/05/2026
 
 Requirements: Tested with Python 3.14
@@ -368,20 +368,55 @@ class CubeViewer:
         return np.array([self.pan_x + iso_x * self.zoom_level,
                          self.pan_y - iso_y * self.zoom_level], dtype=float)
 
-    def draw_player_piece(self, center_2d, player_num, override_color=None):
+    def compute_depth_factor(self, pos):
+        """
+        Returns a value between 0.0 (closest) and ~0.7 (farthest)
+        to darken distant cubes — helps depth perception.
+        Based on actual 3D Z-position after rotation.
+        """
+        # Project the point fully (including Z in screen space)
+        x, y, z = pos
+        cy, sy = math.cos(self.angle_y), math.sin(self.angle_y)
+        cx, sx = math.cos(self.angle_x), math.sin(self.angle_x)
+
+        x1 = x * cy - z * sy
+        z1 = x * sy + z * cy
+
+        y2 = y * cx - z1 * sx
+        # z2 is the true depth in projected space (larger Z2 = farther back)
+        z2 = y * sx + z1 * cx
+
+        # Map z2 into a reasonable depth range for darkening
+        # In our setup: center ≈ 0, min ≈ -SPACING*2.5, max ≈ SPACING*2.5
+        # Let's use 60% of total spread to define darkest point
+        range_min = -SPACING * 2.0
+        range_max = SPACING * 1.0
+        t = (z2 - range_min) / (range_max - range_min)
+        t = max(0.0, min(1.0, t))  # clamp
+
+        # Darken from 0% to ~70%: darkness increases with depth (t)
+        return t * 0.7
+
+    def draw_player_piece(self, center_2d, player_num, override_color=None, depth_factor=0.0):
         char = 'X' if player_num == 1 else 'O'
 
         # Use provided color if given; otherwise compute it as before (fallback)
         if override_color is not None:
-            color = override_color
+            base_color = override_color
         else:
             # Default behavior: only flash all for winner → we'll avoid this now by always passing
             if self.game_over and (self.winner == player_num) and self.flash_timer > 0:
-                color = COLORS['flash_active'] if self.flash_phase else (
+                base_color = COLORS['flash_active'] if self.flash_phase else (
                     COLORS['p1_color'] if player_num == 1 else COLORS['p2_color']
                 )
             else:
-                color = COLORS['p1_color'] if player_num == 1 else COLORS['p2_color']
+                base_color = COLORS['p1_color'] if player_num == 1 else COLORS['p2_color']
+
+        # Apply depth darkening to piece too (optional but nice for consistency)
+        r = int(base_color[0] * (1 - depth_factor))
+        g = int(base_color[1] * (1 - depth_factor))
+        b = int(base_color[2] * (1 - depth_factor))
+        color = (max(0, r), max(0, g), max(0, b))
 
         base_size = int(CUBE_SIZE * 0.85 * self.zoom_level)
         font_size = max(32, base_size)
@@ -439,7 +474,7 @@ class CubeViewer:
                 color = COLORS['p1_color'] if state['player'] == 1 else COLORS['p2_color']
 
             # ✅ Pass `color` explicitly (override default behavior)
-            self.draw_player_piece(center_2d, state['player'], override_color=color)
+            self.draw_player_piece(center_2d, state['player'], override_color=color,depth_factor=self.compute_depth_factor(pos))
 
         else:
             # It's an empty cell
@@ -479,12 +514,33 @@ class CubeViewer:
                 self.screen.blit(text_surf, rect)
 
             else:
-                # Draw Inactive Dot (Grey/White center)
+                # ✅ Compute depth-based darkening factor for visual depth cueing
+                depth_factor = self.compute_depth_factor(pos)
+
+                # Base inactive color (lighter, closer)
+                base_color = COLORS['dot_inactive']
+
+                # Darken each channel by depth_factor: e.g., (140, 170, 220) → * (1 - 0.3) for mid-distance
+                r = int(base_color[0] * (1 - depth_factor))
+                g = int(base_color[1] * (1 - depth_factor))
+                b = int(base_color[2] * (1 - depth_factor))
+
+                # Clamp to [0, 255]
+                dark_color = (max(0, r), max(0, g), max(0, b))
+
                 base_radius = max(1, int(CUBE_SIZE * 0.20 * self.zoom_level))
 
-                shadow_pos = (int(center_2d[0] + 2), int(center_2d[1] + 2))
-                pygame.draw.circle(self.screen, COLORS['dot_shadow'], shadow_pos, base_radius)
-                pygame.draw.circle(self.screen, COLORS['dot_inactive'], tuple(map(int, center_2d)), base_radius)
+                # Shadow remains slightly offset but also darkens for consistency
+                shadow_r = max(0, int(COLORS['dot_shadow'][0] * (1 - depth_factor)))
+                shadow_g = max(0, int(COLORS['dot_shadow'][1] * (1 - depth_factor)))
+                shadow_b = max(0, int(COLORS['dot_shadow'][2] * (1 - depth_factor)))
+                shadow_color = (shadow_r, shadow_g, shadow_b)
+
+                # Draw with depth-based darkening
+                pygame.draw.circle(self.screen, shadow_color,
+                                   (int(center_2d[0]) + 2, int(center_2d[1]) + 2),
+                                   base_radius)
+                pygame.draw.circle(self.screen, dark_color, tuple(map(int, center_2d)), base_radius)
 
     def draw_guide_lines(self):
         line_color = COLORS['grid_lines']

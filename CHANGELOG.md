@@ -1,6 +1,11 @@
 # Changelog
 All notable changes to the project will be documented in this file.
 
+
+## [0.13] - 2026-05-29
+### Changed
+ - First attempt at shading dots and player characters to improve depth perception
+
 ## [0.12] - 2026-05-29
 ### Added
  - This changelog file
