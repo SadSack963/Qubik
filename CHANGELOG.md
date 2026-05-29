@@ -6,6 +6,7 @@ All notable changes to the project will be documented in this file.
 ### Changed
  - Correct axis orientation (Pygame y axis inversion)
  - Default view is math isometric
+ - Toggle to classic isometric
  - Change game reset to restore default view
 
 ## [0.16] - 2026-05-29

@@ -103,6 +103,7 @@ class CubeViewer:
         }
 
         # Current view state (start with math view)
+        self.current_view = 'math'
         self.angle_y = self.view_presets['math']['angle_y']
         self.angle_x = self.view_presets['math']['angle_x']
         self.pan_x = self.view_presets['math']['pan_x']
@@ -485,6 +486,7 @@ class CubeViewer:
     def set_view(self, preset='math', smooth=False):
         """
         Sets camera view to a named preset.
+        If preset='toggle', switches between 'math' and 'classic_isometric'.
 
         Args:
             preset: 'math' (default), 'classic_isometric', or custom dict with keys:
@@ -492,13 +494,19 @@ class CubeViewer:
             smooth: If True, interpolates angles (optional future feature)
         """
         # Get target values
-        if isinstance(preset, str):
+        if preset == 'toggle':
+            self.current_view = ('classic_isometric'
+                                 if self.current_view == 'math'
+                                 else 'math')
+            target = self.view_presets[self.current_view]
+        elif isinstance(preset, str):
+            self.current_view = preset  # remember last set view
             target = self.view_presets.get(preset)
             if not target:
                 print(f"Warning: view preset '{preset}' not found. Using 'math'.")
                 target = self.view_presets['math']
         else:
-            # Allow custom dict
+            # Custom dict override (e.g., {'angle_x': 0})
             target = {k: self.view_presets['math'].get(k, 0) for k in
                       ['angle_y', 'angle_x', 'pan_x', 'pan_y', 'zoom_level']}
             target.update(preset)
@@ -848,6 +856,14 @@ class CubeViewer:
             if hasattr(self, '_m_key_pressed'):
                 del self._m_key_pressed
 
+        if keys[pygame.K_v]:
+            if not hasattr(self, '_view_toggle_pressed'):
+                self.set_view('toggle')
+                self._view_toggle_pressed = True
+        elif not keys[pygame.K_v]:
+            if hasattr(self, '_view_toggle_pressed'):
+                del self._view_toggle_pressed
+
         # Reset View (r key)
         # Restores defaults to start a new game (if game over)
         if keys[pygame.K_r] or keys[pygame.K_HOME]:
@@ -1177,7 +1193,8 @@ class CubeViewer:
                 "W / S: Pan Up / Down",
                 "A / D: Pan Left / Right",
                 "Z / Shift + Z: Zoom In / Out",
-                "R / Home: Reset View / New Game",
+                "R / Home: Math View / New Game",
+                f"V: View {'Math' if self.current_view == 'classic_isometric' else 'Classic'}",
                 f"Ctrl+R: Turn Axes {'OFF' if self.show_axes else 'ON'}",
                 "",
                 f"Current Mode: {self.mode}",
