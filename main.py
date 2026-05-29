@@ -1,6 +1,6 @@
 """
 Author: SadSack963
-Version: 0.16
+Version: 0.17
 Date: 29/05/2026
 
 Requirements: Tested with Python 3.14
@@ -58,9 +58,6 @@ COLORS = {
 
 class CubeViewer:
     def __init__(self):
-        self._r_key_pressed = None
-        self._m_key_pressed = None
-
         pygame.init()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("3D 4x4x4 Tic-Tac-Toe")
@@ -86,10 +83,31 @@ class CubeViewer:
         self.aiThinking = False
 
         # 3D Geometry Setup
-        self.angle_y = 0.785398
-        self.angle_x = 0.61548
-        self.zoom_level = 1.2
-        self.pan_x, self.pan_y = WIDTH // 2, HEIGHT // 2 - 50
+        # Camera presets
+        self.view_presets = {
+            # This is the standard isometric projection used in math, CAD, and data visualization
+            'math': {  # Y vertical, X ~-15°, Z ~45° depth
+                'angle_y': -5 * math.pi / 12,  # -75 degrees
+                'angle_x': 0.0,
+                'pan_x': WIDTH // 2,
+                'pan_y': HEIGHT // 2 - 50,
+                'zoom_level': 1.2
+            },
+            'classic_isometric': {  # Symmetric isometric (X/Y/Z equal)
+                'angle_y': math.pi / 4,  # +45°
+                'angle_x': math.atan(math.sqrt(2) / 2),  # ≈35.264° (ideal iso)
+                'pan_x': WIDTH // 2,
+                'pan_y': HEIGHT // 2 - 50,
+                'zoom_level': 1.0
+            },
+        }
+
+        # Current view state (start with math view)
+        self.angle_y = self.view_presets['math']['angle_y']
+        self.angle_x = self.view_presets['math']['angle_x']
+        self.pan_x = self.view_presets['math']['pan_x']
+        self.pan_y = self.view_presets['math']['pan_y']
+        self.zoom_level = self.view_presets['math']['zoom_level']
 
         # ✅ Add: axes visibility toggle
         self.show_axes = True  # start visible
@@ -356,21 +374,29 @@ class CubeViewer:
     # --- Drawing & Input ---
 
     def project(self, point):
+        """Projects world coordinates (y-up) to Pygame screen (y-down)."""
         x, y, z = point
+
+        # Flip Y: world +Y = up → screen -Y = up (Pygame origin at top)
+        y_screen = -y
+
         cy, sy = math.cos(self.angle_y), math.sin(self.angle_y)
         cx, sx = math.cos(self.angle_x), math.sin(self.angle_x)
 
         x1 = x * cy - z * sy
         z1 = x * sy + z * cy
 
-        y2 = y * cx - z1 * sx
-        z2 = y * sx + z1 * cx
+        y2 = y_screen * cx - z1 * sx
+        z2 = y_screen * sx + z1 * cx
 
+        # Standard isometric flattening (optional, but stabilizes view)
         iso_x = (x1 - z2) * math.cos(math.radians(30))
         iso_y = (x1 + z2) * math.sin(math.radians(30)) - y2
 
-        return np.array([self.pan_x + iso_x * self.zoom_level,
-                         self.pan_y - iso_y * self.zoom_level], dtype=float)
+        return np.array([
+            self.pan_x + iso_x * self.zoom_level,
+            self.pan_y - iso_y * self.zoom_level  # minus because Pygame's y grows down
+        ], dtype=float)
 
     def compute_depth_factor(self, pos):
         """
@@ -456,6 +482,34 @@ class CubeViewer:
         rect = text_surf.get_rect(center=(int(center_2d[0]), int(center_2d[1])))
         self.screen.blit(text_surf, rect)
 
+    def set_view(self, preset='math', smooth=False):
+        """
+        Sets camera view to a named preset.
+
+        Args:
+            preset: 'math' (default), 'classic_isometric', or custom dict with keys:
+                    'angle_y', 'angle_x', 'pan_x', 'pan_y', 'zoom_level'
+            smooth: If True, interpolates angles (optional future feature)
+        """
+        # Get target values
+        if isinstance(preset, str):
+            target = self.view_presets.get(preset)
+            if not target:
+                print(f"Warning: view preset '{preset}' not found. Using 'math'.")
+                target = self.view_presets['math']
+        else:
+            # Allow custom dict
+            target = {k: self.view_presets['math'].get(k, 0) for k in
+                      ['angle_y', 'angle_x', 'pan_x', 'pan_y', 'zoom_level']}
+            target.update(preset)
+
+        # Apply parameters (simple assignment — instant reset)
+        self.angle_y = float(target['angle_y'])
+        self.angle_x = float(target['angle_x'])
+        self.pan_x = int(target['pan_x'])
+        self.pan_y = int(target['pan_y'])
+        self.zoom_level = float(target['zoom_level'])
+
     def draw_cube(self, cube):
         pos = cube['pos']
 
@@ -478,7 +532,8 @@ class CubeViewer:
                 color = COLORS['p1_color'] if state['player'] == 1 else COLORS['p2_color']
 
             # ✅ Pass `color` explicitly (override default behavior)
-            self.draw_player_piece(center_2d, state['player'], override_color=color,depth_factor=self.compute_depth_factor(pos))
+            self.draw_player_piece(center_2d, state['player'], override_color=color,
+                                   depth_factor=self.compute_depth_factor(pos))
 
         else:
             # It's an empty cell
@@ -744,14 +799,6 @@ class CubeViewer:
     def handle_input(self):
         keys = pygame.key.get_pressed()
 
-        # Mode Switching (m key) - only if game over
-        if keys[pygame.K_m] and not hasattr(self, '_m_key_pressed') and self.game_over:
-            self.toggle_mode()
-            self._m_key_pressed = True
-        elif not keys[pygame.K_m]:
-            if hasattr(self, '_m_key_pressed'):
-                del self._m_key_pressed
-
         # Camera Controls (cursor keys)
         if keys[pygame.K_LEFT]:
             self.angle_y -= ROTATION_SPEED
@@ -772,7 +819,7 @@ class CubeViewer:
         elif not keys[pygame.K_r]:
             if hasattr(self, '_r_key_pressed'):
                 del self._r_key_pressed
-                
+
         # Pan (w / a / s / d keys)
         if keys[pygame.K_a]:
             self.pan_x -= PAN_SPEED
@@ -793,9 +840,23 @@ class CubeViewer:
         # Limit zoom levels
         self.zoom_level = max(0.5, min(self.zoom_level, 3.0))
 
-        # Reset (r key) - only if game over
-        if keys[pygame.K_r] and self.game_over:
-            self.reset_game()
+        # Mode Switching (m key) - only if game over
+        if keys[pygame.K_m] and not hasattr(self, '_m_key_pressed'):
+            self.toggle_mode()
+            self._m_key_pressed = True
+        elif not keys[pygame.K_m]:
+            if hasattr(self, '_m_key_pressed'):
+                del self._m_key_pressed
+
+        # Reset View (r key)
+        # Restores defaults to start a new game (if game over)
+        if keys[pygame.K_r] or keys[pygame.K_HOME]:
+            if not hasattr(self, '_view_reset_pressed'):
+                self.reset_game()
+                self._view_reset_pressed = True
+            elif not keys[pygame.K_r and not keys[pygame.K_HOME]]:  # release handler
+                if hasattr(self, '_view_reset_pressed'):
+                    del self._view_reset_pressed
 
     def handle_mouse_click(self):
         """A dedicated method to handle mouse clicks for any human player"""
@@ -874,16 +935,20 @@ class CubeViewer:
             self.mode = 'PvAI'
         else:
             self.mode = 'PvP'
+        self.game_over = True
         self.reset_game()  # Reset on mode switch
 
     def reset_game(self):
-        self.grid_state.clear()
-        self.current_player = 1
-        self.game_over = False
-        self.winner = None
-        self.flash_timer = 0
-        self.aiThinking = False
-        self.winning_line_coords = []  # ✅ Reset winning line coords
+        # ✅ Reset camera to clean view
+        self.set_view('math')
+        if self.game_over:
+            self.grid_state.clear()
+            self.current_player = 1
+            self.game_over = False
+            self.winner = None
+            self.flash_timer = 0
+            self.aiThinking = False
+            self.winning_line_coords = []  # ✅ Reset winning line coords
 
     def run(self):
         running = True
@@ -891,7 +956,7 @@ class CubeViewer:
         font_hud = pygame.font.SysFont("Arial", 20, bold=True)
         small_font = pygame.font.SysFont("Arial", 16, bold=False)
 
-        LEFT_PANEL_WIDTH = 250
+        LEFT_PANEL_WIDTH = 280
         RIGHT_PANEL_WIDTH = 250
 
         # Initialize hover outside the loop
@@ -1111,18 +1176,16 @@ class CubeViewer:
                 "Arrows: Rotate View",
                 "W / S: Pan Up / Down",
                 "A / D: Pan Left / Right",
-                "Z: Zoom In",
-                "Shift + Z: Zoom Out",
+                "Z / Shift + Z: Zoom In / Out",
+                "R / Home: Reset View / New Game",
+                f"Ctrl+R: Turn Axes {'OFF' if self.show_axes else 'ON'}",
                 "",
                 f"Current Mode: {self.mode}",
-                "Press 'M' to Switch",
-                "",
-                "R: Reset",
-                f"Ctrl+R: Axes {'ON' if self.show_axes else 'OFF'}",
+                "M: Switch Mode",
             ]
 
             for i, line in enumerate(instructions):
-                if "Mode" in line:
+                if "Current Mode" in line:
                     txt_instr = font_hud.render(line, True, (50, 255, 150))
                 else:
                     txt_instr = small_font.render(line, True, (200, 200, 200))
