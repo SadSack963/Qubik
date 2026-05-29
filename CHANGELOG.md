@@ -2,6 +2,10 @@
 All notable changes to the project will be documented in this file.
 
 
+## [0.14] - 2026-05-29
+### Changed
+ - Depth shading is now working correctly
+
 ## [0.13] - 2026-05-29
 ### Changed
  - First attempt at shading dots and player characters to improve depth perception

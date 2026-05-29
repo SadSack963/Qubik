@@ -1,6 +1,6 @@
 """
 Author: SadSack963
-Version: 0.13
+Version: 0.14
 Date: 29/05/2026
 
 Requirements: Tested with Python 3.14
@@ -761,39 +761,6 @@ class CubeViewer:
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     self.handle_mouse_click()
 
-                    # if not self.game_over and not self.aiThinking and self.current_player == 1:
-                    #     best_dist_sq = float('inf')
-                    #     target_cube = None
-                    #
-                    #     for cube in self.cubes:
-                    #         center_screen = self.project(cube['pos'])
-                    #         if center_screen is None: continue
-                    #         dx = mouse_pos[0] - center_screen[0]
-                    #         dy = mouse_pos[1] - center_screen[1]
-                    #         dist_sq = dx * dx + dy * dy
-                    #         if dist_sq < (CUBE_SIZE * 2.5) ** 2 and dist_sq < best_dist_sq:
-                    #             best_dist_sq = dist_sq
-                    #             target_cube = cube
-                    #
-                    #     if target_cube is not None:
-                    #         key = target_cube['key']
-                    #         if key not in self.grid_state:
-                    #             self.grid_state[key] = {'player': self.current_player}
-                    #             x_idx, y_idx, z_idx = target_cube['grid_idx']
-                    #
-                    #             winning_player = self.check_win_condition(x_idx, y_idx, z_idx)
-                    #             if winning_player == 1:
-                    #                 self.game_over = True;
-                    #                 self.winner = 1
-                    #                 self.flash_timer = 180
-                    #                 self.player1_wins += 1
-                    #             elif self.check_draw_condition():
-                    #                 self.game_over = True;
-                    #                 self.winner = "Draw"
-                    #                 self.draws += 1
-                    #             else:
-                    #                 self.current_player = 2  # Switch to AI
-
                 elif event.type == pygame.MOUSEMOTION:
                     # Hover effect logic
                     mouse_pos = event.pos
@@ -811,20 +778,6 @@ class CubeViewer:
                             target_cube = cube
                     self.hovered_cube_pos = target_cube['pos'] if target_cube else None
 
-                    # if not self.aiThinking:
-                    #     best_dist_sq = float('inf')
-                    #     target_cube = None
-                    #     for cube in self.cubes:
-                    #         center_screen = self.project(cube['pos'])
-                    #         if center_screen is None: continue
-                    #         dx = mouse_pos[0] - center_screen[0]
-                    #         dy = mouse_pos[1] - center_screen[1]
-                    #         dist_sq = dx * dx + dy * dy
-                    #         if dist_sq < (CUBE_SIZE * 2.5) ** 2 and dist_sq < best_dist_sq:
-                    #             best_dist_sq = dist_sq
-                    #             target_cube = cube
-                    #     self.hovered_cube_pos = target_cube['pos'] if target_cube else None
-
             # Handle Flash Effect Timer
             if self.game_over and self.flash_timer > 0:
                 self.flash_timer -= 1
@@ -837,15 +790,158 @@ class CubeViewer:
 
             self.handle_input()
 
+            # --- CORE DRAWING SECTION ---
+
             self.screen.fill(COLORS['bg'])
             self.draw_guide_lines()
 
-            # Sort cubes for depth painting (Painter's Algorithm)
-            sorted_cubes = sorted(self.cubes, key=lambda c: c['pos'][0] + c['pos'][1] + c['pos'][2], reverse=True)
-            for cube in sorted_cubes:
-                self.draw_cube(cube)
+            # =============================================================
+            # ✅ STEP 1: Precompute depth for all cubes once per frame
+            #    - Used for correct Painter's Algorithm ordering + shading
+            # =============================================================
 
-            # --- UI DRAWING ---
+            depth_map = {}
+
+            for cube in self.cubes:
+                x, y, z = cube['pos']
+
+                # Project to get true Z-depth (screen space)
+                cy, sy = math.cos(self.angle_y), math.sin(self.angle_y)
+                cx, sx = math.cos(self.angle_x), math.sin(self.angle_x)
+
+                x1 = x * cy - z * sy
+                z1 = x * sy + z * cy
+
+                y2 = y * cx - z1 * sx
+                z2 = y * sx + z1 * cx  # True depth: larger = farther back
+
+                # Normalize to [0, 1] using empirical bounds from your setup:
+                # Range ≈ [-SPACING*2.0, SPACING*2.5], tuned to ~95% of points
+                z_min, z_max = -SPACING * 1.8, SPACING * 2.0
+                t = (z2 - z_min) / (z_max - z_min)
+                depth_norm = max(0.0, min(1.0, t))  # clamp
+
+                # Store full info for later use
+                depth_map[cube['key']] = {
+                    'z2': z2,
+                    'depth_norm': depth_norm
+                }
+
+            # =============================================================
+            # ✅ STEP 2: Sort cubes by screen-space Z (far → near)
+            #    - Use negative z2 so far items (large z2) come first in list
+            # =============================================================
+
+            sorted_cubes = sorted(self.cubes, key=lambda c: -depth_map[c['key']]['z2'])
+
+            # =============================================================
+            # ✅ STEP 3: Draw all cubes with depth shading
+            # =============================================================
+
+            for cube in sorted_cubes:
+                pos = cube['pos']
+                center_2d = self.project(pos)
+                z2 = depth_map[cube['key']]['z2']
+                depth_norm = depth_map[cube['key']]['depth_norm']
+
+                # Apply darkness factor (tweak multipliers for effect strength)
+                dark_factor_dot = depth_norm * 0.6  # dots fade up to 60%
+                dark_factor_piece = depth_norm * 0.4  # pieces fade up to 40% (less subtle)
+
+                if cube['key'] in self.grid_state:
+                    state = self.grid_state[cube['key']]
+
+                    # Determine base color (flash or normal)
+                    is_winning_cube = (
+                            self.game_over and
+                            self.flash_timer > 0 and
+                            tuple(cube['grid_idx']) in self.winning_line_coords
+                    )
+
+                    if is_winning_cube:
+                        base_color = COLORS['p1_color'] if state['player'] == 1 else COLORS['p2_color']
+                        color = COLORS['flash_active'] if self.flash_phase else base_color
+                    else:
+                        color = COLORS['p1_color'] if state['player'] == 1 else COLORS['p2_color']
+
+                    # Apply depth-based darkening to piece
+                    r = int(color[0] * (1 - dark_factor_piece))
+                    g = int(color[1] * (1 - dark_factor_piece))
+                    b = int(color[2] * (1 - dark_factor_piece))
+                    final_color = (max(0, r), max(0, g), max(0, b))
+
+                    # ✅ Draw the piece with depth-adjusted color
+                    self.draw_player_piece(center_2d, state['player'], override_color=final_color)
+
+                else:
+                    # Empty cell: draw dot with depth shading
+                    base_dot = COLORS['dot_inactive']
+                    shadow_dot = COLORS['dot_shadow']
+
+                    r = int(base_dot[0] * (1 - dark_factor_dot))
+                    g = int(base_dot[1] * (1 - dark_factor_dot))
+                    b = int(base_dot[2] * (1 - dark_factor_dot))
+                    shaded_dot_color = (max(0, r), max(0, g), max(0, b))
+
+                    sr = int(shadow_dot[0] * (1 - dark_factor_dot * 0.8))  # shadow fades less
+                    sg = int(shadow_dot[1] * (1 - dark_factor_dot * 0.8))
+                    sb = int(shadow_dot[2] * (1 - dark_factor_dot * 0.8))
+                    shaded_shadow_color = (max(0, sr), max(0, sg), max(0, sb))
+
+                    base_radius = max(1, int(CUBE_SIZE * 0.20 * self.zoom_level))
+                    shadow_pos = (int(center_2d[0]) + 2, int(center_2d[1]) + 2)
+
+                    # Draw shadow first
+                    pygame.draw.circle(self.screen, shaded_shadow_color, shadow_pos, base_radius)
+                    # Then main dot
+                    pygame.draw.circle(self.screen, shaded_dot_color, tuple(map(int, center_2d)), base_radius)
+
+            # =============================================================
+            # ✅ STEP 4: Ghost (hover) effect — depth-shaded too?
+            #    Optional: uncomment to fade ghost pieces with distance
+            # =============================================================
+
+            if not self.game_over and not self.aiThinking:
+                if (
+                        (self.mode == 'PvAI' and self.current_player == 1) or
+                        (self.mode == 'PvP')
+                ):
+                    hover_cube = None
+                    for cube in sorted_cubes:  # same order as drawing
+                        pos = cube['pos']
+                        center_2d = self.project(pos)
+                        if np.array_equal(self.hovered_cube_pos, pos):
+                            hover_cube = cube
+                            break
+
+                    if hover_cube:
+                        depth_norm = depth_map[hover_cube['key']]['depth_norm']
+                        # Fade ghost slightly more (weaker opacity)
+                        alpha = int(180 * (0.5 + 0.5 * (1 - depth_norm)))  # closer = brighter
+                        base_color = COLORS['p1_color'] if self.current_player == 1 else COLORS['p2_color']
+                        r = int(base_color[0] * (1 - depth_norm * 0.3))
+                        g = int(base_color[1] * (1 - depth_norm * 0.3))
+                        b = int(base_color[2] * (1 - depth_norm * 0.3))
+                        ghost_color = (max(0, r), max(0, g), max(0, b))
+
+                        # Draw ghost piece
+                        char = 'X' if self.current_player == 1 else 'O'
+                        base_size = int(CUBE_SIZE * 0.7 * self.zoom_level)
+                        font_size = max(25, base_size)
+
+                        try:
+                            font = pygame.font.SysFont("Arial", font_size, bold=True)
+                        except:
+                            font = pygame.font.Font(None, font_size)
+
+                        text_surf = font.render(char, True, ghost_color)
+                        text_surf.set_alpha(alpha)  # apply depth-based transparency
+                        rect = text_surf.get_rect(center=(int(center_2d[0]), int(center_2d[1])))
+                        self.screen.blit(text_surf, rect)
+
+            # =============================================================
+            # ✅ STEP 5: UI & Overlays (unchanged)
+            # =============================================================
 
             left_panel_x = 20
             left_panel_y = HEIGHT - 320
@@ -878,28 +974,21 @@ class CubeViewer:
                 rect_think = thinking_surf.get_rect(center=(WIDTH // 2, HEIGHT - 260))
                 self.screen.blit(thinking_surf, rect_think)
             else:
-                # Current Turn Text
                 if not self.game_over:
-                    # p_name = "Player 1 (You)" if self.current_player == 1 else "AI Player"
-                    if self.mode == 'PvAI':
-                        p_name = "Player 1 (You)" if self.current_player == 1 else "AI Player"
-                        p_color = COLORS['p1_color'] if self.current_player == 1 else COLORS['p2_color']
-                    else:
-                        p_name = f"Player {self.current_player}"
-                        p_color = COLORS['p1_color'] if self.current_player == 1 else COLORS['p2_color']
+                    p_name = "Player 1 (You)" if self.current_player == 1 else \
+                        ("AI Player" if self.mode == 'PvAI' else f"Player {self.current_player}")
                     p_char = "X" if self.current_player == 1 else "O"
-                    # p_color = COLORS['p1_color'] if self.current_player == 1 else (200, 200, 50)
 
-                    # turn_text = f"Current Turn: {p_name} ({p_char})"
-                    turn_text = f"Current Turn: {p_name} ({'X' if self.current_player == 1 else 'O'})"
+                    turn_text = f"Current Turn: {p_name} ({p_char})"
                     txt_turn = font_hud.render(turn_text, True, (255, 255, 255))
                     txt_rect = txt_turn.get_rect(center=(WIDTH // 2, HEIGHT - 260))
                     self.screen.blit(txt_turn, txt_rect)
 
+                    p_color = COLORS['p1_color'] if self.current_player == 1 else COLORS['p2_color']
                     turn_indicator_center = (txt_rect.right + 20, txt_rect.centery)
                     pygame.draw.circle(self.screen, p_color, turn_indicator_center, 10)
 
-            # Right Panel (Scoreboard) remains unchanged
+            # Right Panel (Scoreboard)
             right_panel_x = WIDTH - RIGHT_PANEL_WIDTH - 20
             right_panel_y = HEIGHT - 240
             s_right = pygame.Surface((RIGHT_PANEL_WIDTH, 230))
@@ -910,9 +999,8 @@ class CubeViewer:
             score_title = font_hud.render("Scoreboard", True, (255, 255, 255))
             self.screen.blit(score_title, (right_panel_x + 10, right_panel_y + 15))
 
-            p1_score_text = font_hud.render(f"Player 1 (X): {self.player1_wins} Wins", True, COLORS['p1_color'])
-            # p2_score_text = font_hud.render(f"AI (O): {self.player2_wins} Wins", True, COLORS['p2_color'])
             p2_label = "AI (O)" if self.mode == 'PvAI' else "Player 2 (O)"
+            p1_score_text = font_hud.render(f"Player 1 (X): {self.player1_wins} Wins", True, COLORS['p1_color'])
             p2_score_text = font_hud.render(f"{p2_label}: {self.player2_wins} Wins", True, COLORS['p2_color'])
             draw_text = font_hud.render(f"Draws: {self.draws}", True, (200, 200, 200))
 
@@ -926,16 +1014,16 @@ class CubeViewer:
                     msg_text = font_win.render("GAME OVER: IT'S A DRAW!", True, (255, 255, 255))
                 else:
                     winner_name = "Player 1 Wins!" if self.winner == 1 else \
-                        "AI Wins!" if self.mode == 'PvAI' else "Player 2 Wins!"
+                        ("AI Wins!" if self.mode == 'PvAI' else "Player 2 Wins!")
                     win_color = COLORS['p1_color'] if self.winner == 1 else (80, 140, 255)
                     msg_text = font_win.render(f"{winner_name}", True, win_color)
 
                 rect_win = msg_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 80))
 
-                # Shadow text offset by 4 pixels
                 final_str = "GAME OVER: IT'S A DRAW!" if self.winner == "Draw" else \
                     "Player 1 Wins!" if self.winner == 1 else \
-                    "AI Wins!" if self.mode == 'PvAI' else "Player 2 Wins!"
+                        ("AI Wins!" if self.mode == 'PvAI' else "Player 2 Wins!")
+
                 shadow_surface = font_win.render(final_str, True, (0, 0, 0))
                 shadow_rect = shadow_surface.get_rect(center=(WIDTH // 2 + 4, HEIGHT // 2 - 80 + 4))
                 self.screen.blit(shadow_surface, shadow_rect)
