@@ -1,6 +1,6 @@
 """
 Author: SadSack963
-Version: 0.15
+Version: 0.16
 Date: 29/05/2026
 
 Requirements: Tested with Python 3.14
@@ -58,6 +58,7 @@ COLORS = {
 
 class CubeViewer:
     def __init__(self):
+        self._r_key_pressed = None
         self._m_key_pressed = None
 
         pygame.init()
@@ -89,6 +90,9 @@ class CubeViewer:
         self.angle_x = 0.61548
         self.zoom_level = 1.2
         self.pan_x, self.pan_y = WIDTH // 2, HEIGHT // 2 - 50
+
+        # ✅ Add: axes visibility toggle
+        self.show_axes = True  # start visible
 
         offset = -(4 - 1) * SPACING / 2.0
         self.cubes = []
@@ -542,6 +546,139 @@ class CubeViewer:
                                    base_radius)
                 pygame.draw.circle(self.screen, dark_color, tuple(map(int, center_2d)), base_radius)
 
+    def draw_axes(self):
+        """Draws world-aligned axes: X=red, Y=green, Z=blue + labels"""
+        if not self.show_axes:
+            return
+
+        # Define axis length in world units — tuned for visibility
+        axis_len = SPACING * 3.5  # slightly larger than grid extent (grid spans ~SPACING*3)
+
+        # Endpoints (world coordinates)
+        origin = np.array([0.0, 0.0, 0.0])
+
+        x_end = origin + np.array([axis_len, 0.0, 0.0])  # X axis
+        y_end = origin + np.array([0.0, axis_len, 0.0])  # Y axis (up in world)
+        z_end = origin + np.array([0.0, 0.0, axis_len])  # Z axis
+
+        # Project all points to screen space
+        o_2d = self.project(origin)
+        x_2d = self.project(x_end)
+        y_2d = self.project(y_end)
+        z_2d = self.project(z_end)
+
+        # Draw lines (thicker than guide lines)
+        line_width = 3
+
+        # Colors
+        x_color = COLORS['p1_color']  # red/coral
+        y_color = (80, 255, 80)  # bright green
+        z_color = COLORS['p2_color']  # blue
+
+        pygame.draw.line(self.screen, x_color, tuple(map(int, o_2d)), tuple(map(int, x_2d)), line_width)
+        pygame.draw.line(self.screen, y_color, tuple(map(int, o_2d)), tuple(map(int, y_2d)), line_width)
+        pygame.draw.line(self.screen, z_color, tuple(map(int, o_2d)), tuple(map(int, z_2d)), line_width)
+
+        # Helper to draw arrowhead (same as before)
+        def draw_arrowhead(center, end_point, color):
+            vec = np.array(end_point) - np.array(center)
+            length = math.hypot(*vec)
+            if length < 5:
+                return
+
+            dx, dy = vec / length
+            perp_x, perp_y = -dy, dx
+            head_len = max(10, int(CUBE_SIZE * 0.4 * self.zoom_level))
+            base_width = max(3, int(head_len * 0.6))
+
+            tip = end_point
+            base1 = end_point - np.array([dx * head_len + perp_x * base_width,
+                                          dy * head_len + perp_y * base_width])
+            base2 = end_point - np.array([dx * head_len - perp_x * base_width,
+                                          dy * head_len - perp_y * base_width])
+
+            pts = [tuple(map(int, tip)), tuple(map(int, base1)), tuple(map(int, base2))]
+            pygame.draw.polygon(self.screen, color, pts)
+
+        # Draw arrowheads
+        draw_arrowhead(o_2d, x_2d, x_color)
+        draw_arrowhead(o_2d, y_2d, y_color)
+        draw_arrowhead(o_2d, z_2d, z_color)
+
+        # --- ✅ Now: Add text labels near arrowheads ---
+        # Label offset (pixels) — outward from axis origin, perpendicular to axis line
+        label_offset = max(15, int(CUBE_SIZE * 0.35 * self.zoom_level))
+
+        try:
+            font = pygame.font.SysFont("Arial", int(24 * self.zoom_level), bold=True)
+        except:
+            font = pygame.font.Font(None, int(24 * self.zoom_level))
+
+        # Helper to compute label position & darkness (if desired)
+        def render_axis_label(text, tip_pos, color):
+            # Direction vector from origin to tip
+            vec = np.array(tip_pos) - np.array(o_2d)
+            length = math.hypot(*vec)
+            if length < 1:
+                return None
+
+            dx, dy = vec / length
+
+            # Perpendicular offset for label (rotate +90°: (dx, dy) → (-dy, dx))
+            perp_x, perp_y = -dy, dx
+            offset_vec = np.array([perp_x * label_offset, perp_y * label_offset])
+
+            pos = tip_pos + offset_vec
+
+            # Optional depth darkening (same as pieces)
+            z2 = 0.0
+            for cube in self.cubes:
+                if cube['key'] == "0,0,0":  # origin cube approx — or just compute directly:
+                    x, y, z = cube['pos']
+                    cy, sy = math.cos(self.angle_y), math.sin(self.angle_y)
+                    cx, sx = math.cos(self.angle_x), math.sin(self.angle_x)
+                    x1 = x * cy - z * sy
+                    z1 = x * sy + z * cy
+                    y2 = y * cx - z1 * sx
+                    z2 = y * sx + z1 * cx
+                    break
+
+            # Normalize for depth (using same bounds as drawing loop)
+            z_min, z_max = -SPACING * 1.8, SPACING * 2.0
+            t = (z2 - z_min) / (z_max - z_min)
+            depth_norm = max(0.0, min(1.0, t))
+            dark_factor = depth_norm * 0.3  # max 30% darker
+
+            r = int(color[0] * (1 - dark_factor))
+            g = int(color[1] * (1 - dark_factor))
+            b = int(color[2] * (1 - dark_factor))
+            final_color = (max(0, r), max(0, g), max(0, b))
+
+            # Render label
+            text_surf = font.render(text, True, final_color)
+            rect = text_surf.get_rect(center=(int(pos[0]), int(pos[1])))
+
+            return text_surf, rect
+
+        # ✅ Draw X label (near X arrowhead)
+        x_label_data = render_axis_label("X", x_2d, x_color)
+        if x_label_data:
+            self.screen.blit(x_label_data[0], x_label_data[1])
+
+        # ✅ Draw Y label (near Y arrowhead)
+        y_label_data = render_axis_data = render_axis_label("Y", y_2d, y_color)
+        if y_label_data:
+            self.screen.blit(y_label_data[0], y_label_data[1])
+
+        # ✅ Draw Z label (near Z arrowhead)
+        z_label_data = render_axis_label("Z", z_2d, z_color)
+        if z_label_data:
+            self.screen.blit(z_label_data[0], z_label_data[1])
+
+        # Draw origin marker (small sphere)
+        o_radius = max(3, int(CUBE_SIZE * 0.15 * self.zoom_level))
+        pygame.draw.circle(self.screen, (255, 255, 255), tuple(map(int, o_2d)), o_radius)
+
     def draw_guide_lines(self):
         line_color = COLORS['grid_lines']
         for cube in self.cubes:
@@ -626,6 +763,16 @@ class CubeViewer:
         elif keys[pygame.K_DOWN]:
             self.angle_x += ROTATION_SPEED
 
+        # ✅ Toggle axes: Ctrl+R
+        modifiers = pygame.key.get_mods()
+        if keys[pygame.K_r] and modifiers & pygame.KMOD_CTRL:
+            if not hasattr(self, '_r_key_pressed'):
+                self.show_axes = not self.show_axes
+                self._r_key_pressed = True  # prevent repeat on hold
+        elif not keys[pygame.K_r]:
+            if hasattr(self, '_r_key_pressed'):
+                del self._r_key_pressed
+                
         # Pan (w / a / s / d keys)
         if keys[pygame.K_a]:
             self.pan_x -= PAN_SPEED
@@ -744,8 +891,8 @@ class CubeViewer:
         font_hud = pygame.font.SysFont("Arial", 20, bold=True)
         small_font = pygame.font.SysFont("Arial", 16, bold=False)
 
-        LEFT_PANEL_WIDTH = 300
-        RIGHT_PANEL_WIDTH = 300
+        LEFT_PANEL_WIDTH = 250
+        RIGHT_PANEL_WIDTH = 250
 
         # Initialize hover outside the loop
         self.hovered_cube_pos = None
@@ -794,6 +941,9 @@ class CubeViewer:
 
             self.screen.fill(COLORS['bg'])
             self.draw_guide_lines()
+
+            # ✅ Draw axes (if enabled) BEFORE grid/dots/cubes
+            self.draw_axes()
 
             # =============================================================
             # ✅ STEP 1: Precompute depth for all cubes once per frame
@@ -948,8 +1098,8 @@ class CubeViewer:
             # =============================================================
 
             left_panel_x = 20
-            left_panel_y = HEIGHT - 320
-            s_left = pygame.Surface((LEFT_PANEL_WIDTH, 310))
+            left_panel_y = HEIGHT - 400
+            s_left = pygame.Surface((LEFT_PANEL_WIDTH, 390))
             s_left.set_alpha(220)
             s_left.fill(COLORS['ui_panel_bg'])
             self.screen.blit(s_left, (left_panel_x, left_panel_y))
@@ -959,11 +1109,16 @@ class CubeViewer:
 
             instructions = [
                 "Arrows: Rotate View",
-                "W / S: Pan Up / Down", "A / D: Pan Left / Right",
-                "Z: Zoom In", "Shift + Z: Zoom Out",
+                "W / S: Pan Up / Down",
+                "A / D: Pan Left / Right",
+                "Z: Zoom In",
+                "Shift + Z: Zoom Out",
                 "",
                 f"Current Mode: {self.mode}",
                 "Press 'M' to Switch",
+                "",
+                "R: Reset",
+                f"Ctrl+R: Axes {'ON' if self.show_axes else 'OFF'}",
             ]
 
             for i, line in enumerate(instructions):
@@ -985,7 +1140,7 @@ class CubeViewer:
 
                     turn_text = f"Current Turn: {p_name} ({p_char})"
                     txt_turn = font_hud.render(turn_text, True, (255, 255, 255))
-                    txt_rect = txt_turn.get_rect(center=(WIDTH // 2, HEIGHT - 260))
+                    txt_rect = txt_turn.get_rect(center=(WIDTH // 2, HEIGHT - 170))
                     self.screen.blit(txt_turn, txt_rect)
 
                     p_color = COLORS['p1_color'] if self.current_player == 1 else COLORS['p2_color']

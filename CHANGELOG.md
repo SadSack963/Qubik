@@ -2,6 +2,10 @@
 All notable changes to the project will be documented in this file.
 
 
+## [0.16] - 2026-05-29
+### Changed
+ - Add axes to aid visualization
+
 ## [0.15] - 2026-05-29
 ### Changed
  - Dots slightly smaller
