@@ -2,6 +2,11 @@
 All notable changes to the project will be documented in this file.
 
 
+## [0.15] - 2026-05-29
+### Changed
+ - Dots slightly smaller
+ - Ghost bigger and now yellow before placement
+
 ## [0.14] - 2026-05-29
 ### Changed
  - Depth shading is now working correctly

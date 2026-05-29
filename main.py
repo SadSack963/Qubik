@@ -1,6 +1,6 @@
 """
 Author: SadSack963
-Version: 0.14
+Version: 0.15
 Date: 29/05/2026
 
 Requirements: Tested with Python 3.14
@@ -790,7 +790,7 @@ class CubeViewer:
 
             self.handle_input()
 
-            # --- CORE DRAWING SECTION ---
+            # --- CORE DRAWING SECTION (REPLACEMENT) ---
 
             self.screen.fill(COLORS['bg'])
             self.draw_guide_lines()
@@ -835,7 +835,7 @@ class CubeViewer:
             sorted_cubes = sorted(self.cubes, key=lambda c: -depth_map[c['key']]['z2'])
 
             # =============================================================
-            # ✅ STEP 3: Draw all cubes with depth shading
+            # ✅ STEP 3: Draw all cubes with depth shading & updated sizes
             # =============================================================
 
             for cube in sorted_cubes:
@@ -874,7 +874,7 @@ class CubeViewer:
                     self.draw_player_piece(center_2d, state['player'], override_color=final_color)
 
                 else:
-                    # Empty cell: draw dot with depth shading
+                    # Empty cell: draw dot with depth shading — NOW SMALLER!
                     base_dot = COLORS['dot_inactive']
                     shadow_dot = COLORS['dot_shadow']
 
@@ -888,7 +888,9 @@ class CubeViewer:
                     sb = int(shadow_dot[2] * (1 - dark_factor_dot * 0.8))
                     shaded_shadow_color = (max(0, sr), max(0, sg), max(0, sb))
 
-                    base_radius = max(1, int(CUBE_SIZE * 0.20 * self.zoom_level))
+                    # ✅ Smaller radius: 0.85 × original (was CUBE_SIZE * 0.20 → now * 0.17)
+                    base_radius = max(1, int(CUBE_SIZE * 0.17 * self.zoom_level))
+
                     shadow_pos = (int(center_2d[0]) + 2, int(center_2d[1]) + 2)
 
                     # Draw shadow first
@@ -897,8 +899,7 @@ class CubeViewer:
                     pygame.draw.circle(self.screen, shaded_dot_color, tuple(map(int, center_2d)), base_radius)
 
             # =============================================================
-            # ✅ STEP 4: Ghost (hover) effect — depth-shaded too?
-            #    Optional: uncomment to fade ghost pieces with distance
+            # ✅ STEP 4: Ghost (hover) effect — same size as placed, yellow!
             # =============================================================
 
             if not self.game_over and not self.aiThinking:
@@ -916,24 +917,27 @@ class CubeViewer:
 
                     if hover_cube:
                         depth_norm = depth_map[hover_cube['key']]['depth_norm']
-                        # Fade ghost slightly more (weaker opacity)
-                        alpha = int(180 * (0.5 + 0.5 * (1 - depth_norm)))  # closer = brighter
-                        base_color = COLORS['p1_color'] if self.current_player == 1 else COLORS['p2_color']
-                        r = int(base_color[0] * (1 - depth_norm * 0.3))
-                        g = int(base_color[1] * (1 - depth_norm * 0.3))
-                        b = int(base_color[2] * (1 - depth_norm * 0.3))
-                        ghost_color = (max(0, r), max(0, g), max(0, b))
 
-                        # Draw ghost piece
-                        char = 'X' if self.current_player == 1 else 'O'
-                        base_size = int(CUBE_SIZE * 0.7 * self.zoom_level)
-                        font_size = max(25, base_size)
+                        # ✅ Ghost: same font size as placed pieces (base_size computed in draw_player_piece)
+                        base_size = int(CUBE_SIZE * 0.85 * self.zoom_level)  # ← SAME SIZE!
+                        font_size = max(32, base_size)
 
                         try:
                             font = pygame.font.SysFont("Arial", font_size, bold=True)
                         except:
                             font = pygame.font.Font(None, font_size)
 
+                        # ✅ Yellow ghost (brighter for visibility)
+                        yellow_ghost = (255, 230, 80)  # COLORS['ghost_color'] already defined as this
+                        r = int(yellow_ghost[0] * (1 - depth_norm * 0.2))
+                        g = int(yellow_ghost[1] * (1 - depth_norm * 0.2))
+                        b = int(yellow_ghost[2] * (1 - depth_norm * 0.2))
+                        ghost_color = (max(0, r), max(0, g), max(0, b))
+
+                        # ✅ Slightly transparent for depth cueing
+                        alpha = int(180 * (0.7 + 0.3 * (1 - depth_norm)))  # closer = brighter/less transparent
+
+                        char = 'X' if self.current_player == 1 else 'O'
                         text_surf = font.render(char, True, ghost_color)
                         text_surf.set_alpha(alpha)  # apply depth-based transparency
                         rect = text_surf.get_rect(center=(int(center_2d[0]), int(center_2d[1])))
