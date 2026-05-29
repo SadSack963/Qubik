@@ -1,6 +1,6 @@
 """
 Author: SadSack963
-Version: 0.17
+Version: 0.18
 Date: 29/05/2026
 
 Requirements: Tested with Python 3.14
@@ -125,6 +125,13 @@ class CubeViewer:
                     key_str = f"{x},{y},{z}"
                     cube_data = {'pos': pos, 'key': key_str, 'grid_idx': (x, y, z)}
                     self.cubes.append(cube_data)
+
+        # Camera animation state
+        self.animating_view = False  # is a view transition active?
+        self.anim_start_time = None  # when did it start? (pygame time in ms)
+        self.anim_duration_ms = 500  # duration: 0.5 seconds
+        self.anim_target = {}  # target values to animate TO
+        self.anim_initial = {}  # current values at start of anim
 
     # --- Core Logic & AI ---
 
@@ -374,29 +381,82 @@ class CubeViewer:
 
     # --- Drawing & Input ---
 
+    def get_effective_camera(self):
+        """Returns dict of current camera values, updating self.angle_* if animating."""
+        if not self.animating_view:
+            # No animation: use stored state directly
+            return {
+                'angle_y': self.angle_y,
+                'angle_x': self.angle_x,
+                'pan_x': self.pan_x,
+                'pan_y': self.pan_y,
+                'zoom_level': self.zoom_level
+            }
+
+        now = pygame.time.get_ticks()
+        elapsed_ms = now - self.anim_start_time
+        if elapsed_ms >= self.anim_duration_ms:
+            # Animation complete → snap to target AND update stored state!
+            self.animating_view = False
+
+            # ←←← CRITICAL: Update actual camera variables here!
+            self.angle_y = float(self.anim_target['angle_y'])
+            self.angle_x = float(self.anim_target['angle_x'])
+            self.pan_x = int(self.anim_target['pan_x'])
+            self.pan_y = int(self.anim_target['pan_y'])
+            self.zoom_level = float(self.anim_target['zoom_level'])
+
+            return self.anim_target.copy()
+
+        # Still animating → interpolate
+        t = elapsed_ms / self.anim_duration_ms
+
+        def lerp(a, b):
+            return a + (b - a) * t
+
+        current = {
+            'angle_y': lerp(self.anim_initial['angle_y'], self.anim_target['angle_y']),
+            'angle_x': lerp(self.anim_initial['angle_x'], self.anim_target['angle_x']),
+            'pan_x': lerp(self.anim_initial['pan_x'], self.anim_target['pan_x']),
+            'pan_y': lerp(self.anim_initial['pan_y'], self.anim_target['pan_y']),
+            'zoom_level': lerp(self.anim_initial['zoom_level'], self.anim_target['zoom_level'])
+        }
+
+        # Also update stored state *in real time* so project() always sees correct values
+        self.angle_y = current['angle_y']
+        self.angle_x = current['angle_x']
+        self.pan_x = int(current['pan_x'])
+        self.pan_y = int(current['pan_y'])
+        self.zoom_level = current['zoom_level']
+
+        return current
+
     def project(self, point):
-        """Projects world coordinates (y-up) to Pygame screen (y-down)."""
+        """Projects a 3D world point to 2D screen using the *actual* camera state (animated or not)."""
         x, y, z = point
 
-        # Flip Y: world +Y = up → screen -Y = up (Pygame origin at top)
-        y_screen = -y
+        # Get current effective camera (always up-to-date)
+        cam = self.get_effective_camera()
 
-        cy, sy = math.cos(self.angle_y), math.sin(self.angle_y)
-        cx, sx = math.cos(self.angle_x), math.sin(self.angle_x)
+        cy = math.cos(cam['angle_y'])
+        sy = math.sin(cam['angle_y'])
+        cx = math.cos(cam['angle_x'])
+        sx = math.sin(cam['angle_x'])
 
+        # Rotate around Y: XZ-plane
         x1 = x * cy - z * sy
         z1 = x * sy + z * cy
 
-        y2 = y_screen * cx - z1 * sx
-        z2 = y_screen * sx + z1 * cx
+        # Flip Y to match Pygame
+        y2 = (-y) * cx - z1 * sx
+        z2 = (-y) * sx + z1 * cx
 
-        # Standard isometric flattening (optional, but stabilizes view)
         iso_x = (x1 - z2) * math.cos(math.radians(30))
         iso_y = (x1 + z2) * math.sin(math.radians(30)) - y2
 
         return np.array([
-            self.pan_x + iso_x * self.zoom_level,
-            self.pan_y - iso_y * self.zoom_level  # minus because Pygame's y grows down
+            cam['pan_x'] + iso_x * cam['zoom_level'],
+            cam['pan_y'] - iso_y * cam['zoom_level']
         ], dtype=float)
 
     def compute_depth_factor(self, pos):
@@ -483,40 +543,87 @@ class CubeViewer:
         rect = text_surf.get_rect(center=(int(center_2d[0]), int(center_2d[1])))
         self.screen.blit(text_surf, rect)
 
-    def set_view(self, preset='math', smooth=False):
+    def set_view(self, preset='math', animate=False):
         """
-        Sets camera view to a named preset.
-        If preset='toggle', switches between 'math' and 'classic_isometric'.
+        Sets camera view (optionally with animation).
 
         Args:
-            preset: 'math' (default), 'classic_isometric', or custom dict with keys:
-                    'angle_y', 'angle_x', 'pan_x', 'pan_y', 'zoom_level'
-            smooth: If True, interpolates angles (optional future feature)
+            preset: 'math' | 'classic_isometric' | 'toggle' | custom dict
+            animate: if True, interpolates over self.anim_duration_ms (0.5s)
         """
-        # Get target values
-        if preset == 'toggle':
-            self.current_view = ('classic_isometric'
-                                 if self.current_view == 'math'
-                                 else 'math')
-            target = self.view_presets[self.current_view]
-        elif isinstance(preset, str):
-            self.current_view = preset  # remember last set view
-            target = self.view_presets.get(preset)
-            if not target:
+        # Belt and Braces!
+        if not hasattr(self, 'current_view'):  # first-time setup
+            self.current_view = 'math'  # fallback init
+
+        # Determine target values
+        if isinstance(preset, str):
+            if preset == 'toggle':
+                self.current_view = ('classic_isometric'
+                               if self.current_view == 'math'
+                               else 'math')
+                target = self.view_presets[self.current_view]
+            elif preset in self.view_presets:
+                target = self.view_presets[preset]
+            else:
                 print(f"Warning: view preset '{preset}' not found. Using 'math'.")
                 target = self.view_presets['math']
         else:
-            # Custom dict override (e.g., {'angle_x': 0})
+            # Custom dict: fill missing keys with 'math' defaults
             target = {k: self.view_presets['math'].get(k, 0) for k in
                       ['angle_y', 'angle_x', 'pan_x', 'pan_y', 'zoom_level']}
             target.update(preset)
 
-        # Apply parameters (simple assignment — instant reset)
-        self.angle_y = float(target['angle_y'])
-        self.angle_x = float(target['angle_x'])
-        self.pan_x = int(target['pan_x'])
-        self.pan_y = int(target['pan_y'])
-        self.zoom_level = float(target['zoom_level'])
+        if animate:
+            # ✅ CRITICAL: Initialize animation state FIRST (even if not animating yet)
+            self.anim_start_time = pygame.time.get_ticks()
+            self.anim_duration_ms = 500
+            self.anim_initial = {
+                'angle_y': self.angle_y,
+                'angle_x': self.angle_x,
+                'pan_x': self.pan_x,
+                'pan_y': self.pan_y,
+                'zoom_level': self.zoom_level,
+            }
+            self.anim_target = target.copy()
+            self.animating_view = True
+        else:
+            # Instant snap: update state directly
+            self.angle_y = float(target['angle_y'])
+            self.angle_x = float(target['angle_x'])
+            self.pan_x = int(target['pan_x'])
+            self.pan_y = int(target['pan_y'])
+            self.zoom_level = float(target['zoom_level'])
+
+    def get_animated_view(self):
+        """Returns dict of current animated camera state (lerp between initial and target)."""
+        if not self.animating_view:
+            return {
+                'angle_y': self.angle_y,
+                'angle_x': self.angle_x,
+                'pan_x': self.pan_x,
+                'pan_y': self.pan_y,
+                'zoom_level': self.zoom_level
+            }
+
+        now = pygame.time.get_ticks()
+        elapsed_ms = now - self.anim_start_time
+        if elapsed_ms >= self.anim_duration_ms:
+            # Animation complete → snap to target (no overshoot)
+            self.animating_view = False
+            return self.anim_target.copy()
+
+        t = elapsed_ms / self.anim_duration_ms  # progress: 0.0 → 1.0
+
+        def lerp(a, b):  # Linear Interpolation
+            return a + (b - a) * t
+
+        return {
+            'angle_y': lerp(self.anim_initial['angle_y'], self.anim_target['angle_y']),
+            'angle_x': lerp(self.anim_initial['angle_x'], self.anim_target['angle_x']),
+            'pan_x': lerp(self.anim_initial['pan_x'], self.anim_target['pan_x']),
+            'pan_y': lerp(self.anim_initial['pan_y'], self.anim_target['pan_y']),
+            'zoom_level': lerp(self.anim_initial['zoom_level'], self.anim_target['zoom_level'])
+        }
 
     def draw_cube(self, cube):
         pos = cube['pos']
@@ -848,7 +955,7 @@ class CubeViewer:
         # Limit zoom levels
         self.zoom_level = max(0.5, min(self.zoom_level, 3.0))
 
-        # Mode Switching (m key) - only if game over
+        # Mode Switching (m key)
         if keys[pygame.K_m] and not hasattr(self, '_m_key_pressed'):
             self.toggle_mode()
             self._m_key_pressed = True
@@ -858,7 +965,7 @@ class CubeViewer:
 
         if keys[pygame.K_v]:
             if not hasattr(self, '_view_toggle_pressed'):
-                self.set_view('toggle')
+                self.set_view('toggle', animate=True)
                 self._view_toggle_pressed = True
         elif not keys[pygame.K_v]:
             if hasattr(self, '_view_toggle_pressed'):
@@ -956,7 +1063,8 @@ class CubeViewer:
 
     def reset_game(self):
         # ✅ Reset camera to clean view
-        self.set_view('math')
+        self.set_view(self.current_view, animate=True)   # ← animate the reset!
+
         if self.game_over:
             self.grid_state.clear()
             self.current_player = 1

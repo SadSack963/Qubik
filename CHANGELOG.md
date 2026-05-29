@@ -4,6 +4,10 @@ All notable changes to the project will be documented in this file.
 
 ## [0.17] - 2026-05-29
 ### Changed
+ - Animated switch views
+
+## [0.17] - 2026-05-29
+### Changed
  - Correct axis orientation (Pygame y axis inversion)
  - Default view is math isometric
  - Toggle to classic isometric
