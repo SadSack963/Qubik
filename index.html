@@ -912,6 +912,14 @@ class CubeViewer {
     setupInputs() {
         // Keyboard
         window.addEventListener('keydown', (e) => {
+            // ⚠️ HANDLE MODIFIER KEYS FIRST — they should take precedence over plain keys
+            if (e.ctrlKey && e.key.toLowerCase() === 'r') {
+                this.showAxes = !this.showAxes;
+                e.preventDefault(); // Prevent browser default (e.g., reload)
+                return;             // ✅ Early exit: stop further processing
+            }
+
+            // Now handle non-modified keys
             if (e.key === 'ArrowLeft') this.angleY -= ROTATION_SPEED;
             else if (e.key === 'ArrowRight') this.angleY += ROTATION_SPEED;
             else if (e.key === 'ArrowUp') this.angleX -= ROTATION_SPEED;
@@ -936,15 +944,12 @@ class CubeViewer {
                 this.resetGame();
             }
             else if (e.key.toLowerCase() === 'v') this.setView('toggle', true);
+
+            // ⚠️ Keep 'r' logic *after* Ctrl+R check — and only run if NOT holding Ctrl
             else if ((e.key.toLowerCase() === 'r' || e.key === 'Home')) {
                 // If game over, reset game. Otherwise, reset view.
                 if (this.gameOver) this.resetGame();
                 else this.setView(this.currentView, false);
-            }
-
-            // Axes
-            else if (e.ctrlKey && e.key.toLowerCase() === 'r') {
-                this.showAxes = !this.showAxes;
             }
 
             // Limit Zoom
