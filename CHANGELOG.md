@@ -2,6 +2,10 @@
 All notable changes to the project will be documented in this file.
 
 
+## [0.18] - 2026-05-29
+### Changed
+ - Added docstrings and type hints
+
 ## [0.17] - 2026-05-29
 ### Changed
  - Animated switch views

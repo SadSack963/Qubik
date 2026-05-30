@@ -12,6 +12,7 @@ import pygame
 import math
 import numpy as np
 import copy
+from typing import Optional, Union, List, Tuple, Dict, Any
 
 # -------------------------
 # CONFIGURATION & CONSTANTS
@@ -29,7 +30,7 @@ PAN_SPEED = 6
 ZOOM_STEP = 0.95  # < 1.0 shrinks the view (zooms out)
 ZOOM_IN_FACTOR = 1.1  # > 1.0 magnifies the view (zooms in)
 
-COLORS = {
+COLORS: Dict[str, Tuple[int, int, int] | Tuple[int, int, int, int]] = {
     'bg': (20, 20, 25),
 
     # Board Colors
@@ -58,33 +59,36 @@ COLORS = {
 
 class CubeViewer:
     def __init__(self):
+        """
+        Initializes the game engine, display, and game state.
+        """
         pygame.init()
-        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        self.screen: pygame.Surface = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("3D 4x4x4 Tic-Tac-Toe")
-        self.clock = pygame.time.Clock()
+        self.clock: pygame.time.Clock = pygame.time.Clock()
 
         # Game State
-        self.mode = 'PvP'  # 'PvP' or 'PvAI'
-        self.current_player = 1
-        self.grid_state = {}  # Key: "x,y,z", Value: {'player': int}
+        self.mode: str = 'PvP'  # 'PvP' or 'PvAI'
+        self.current_player: int = 1
+        self.grid_state: Dict[str, Dict[str, int]] = {}  # Key: "x,y,z", Value: {'player': int}
 
-        self.player1_wins = 0
-        self.player2_wins = 0
-        self.draws = 0
+        self.player1_wins: int = 0
+        self.player2_wins: int = 0
+        self.draws: int = 0
 
-        self.hovered_cube_pos = None
-        self.game_over = False
-        self.winner = None  # 1, 2, or "Draw"
-        self.flash_timer = 0  # For the winning flash effect
-        self.flash_phase = True  # True = White, False = Original Color
-        self.winning_line_coords = []  # ✅ Store winning coords here
+        self.hovered_cube_pos: Optional[np.ndarray] = None
+        self.game_over: bool = False
+        self.winner: Optional[Union[int, str]] = None  # 1, 2, or "Draw"
+        self.flash_timer: int = 0  # For the winning flash effect
+        self.flash_phase: bool = True  # True = White, False = Original Color
+        self.winning_line_coords: List[Tuple[int, int, int]] = []  # ✅ Store winning coords here
 
         # AI State
-        self.aiThinking = False
+        self.aiThinking: bool = False
 
         # 3D Geometry Setup
         # Camera presets
-        self.view_presets = {
+        self.view_presets: Dict[str, Dict[str, float | int]] = {
             # This is the standard isometric projection used in math, CAD, and data visualization
             'math': {  # Y vertical, X ~-15°, Z ~45° depth
                 'angle_y': -5 * math.pi / 12,  # -75 degrees
@@ -103,18 +107,18 @@ class CubeViewer:
         }
 
         # Current view state (start with math view)
-        self.current_view = 'math'
-        self.angle_y = self.view_presets['math']['angle_y']
-        self.angle_x = self.view_presets['math']['angle_x']
-        self.pan_x = self.view_presets['math']['pan_x']
-        self.pan_y = self.view_presets['math']['pan_y']
-        self.zoom_level = self.view_presets['math']['zoom_level']
+        self.current_view: str = 'math'
+        self.angle_y: float = self.view_presets['math']['angle_y']
+        self.angle_x: float = self.view_presets['math']['angle_x']
+        self.pan_x: int = self.view_presets['math']['pan_x']
+        self.pan_y: int = self.view_presets['math']['pan_y']
+        self.zoom_level: float = self.view_presets['math']['zoom_level']
 
         # ✅ Add: axes visibility toggle
-        self.show_axes = True  # start visible
+        self.show_axes: bool = True  # start visible
 
         offset = -(4 - 1) * SPACING / 2.0
-        self.cubes = []
+        self.cubes: List[Dict[str, Any]] = []
 
         for x in range(4):
             for y in range(4):
@@ -127,27 +131,37 @@ class CubeViewer:
                     self.cubes.append(cube_data)
 
         # Camera animation state
-        self.animating_view = False  # is a view transition active?
-        self.anim_start_time = None  # when did it start? (pygame time in ms)
-        self.anim_duration_ms = 500  # duration: 0.5 seconds
-        self.anim_target = {}  # target values to animate TO
-        self.anim_initial = {}  # current values at start of anim
+        self.animating_view: bool = False  # is a view transition active?
+        self.anim_start_time: Optional[int] = None  # when did it start? (pygame time in ms)
+        self.anim_duration_ms: int = 500  # duration: 0.5 seconds
+        self.anim_target: Dict[str, float | int] = {}  # target values to animate TO
+        self.anim_initial: Dict[str, float | int] = {}  # current values at start of anim
 
     # --- Core Logic & AI ---
 
-    def get_available_moves(self):
-        """Returns a list of grid indices [(x,y,z), ...] for empty spots"""
-        moves = []
+    def get_available_moves(self) -> List[Tuple[int, int, int]]:
+        """
+        Returns a list of grid indices [(x,y,z), ...] for empty spots.
+
+        Returns:
+            List of (x, y, z) coordinate tuples representing available moves.
+        """
+        moves: List[Tuple[int, int, int]] = []
         for cube in self.cubes:
             if cube['key'] not in self.grid_state:
                 moves.append(cube['grid_idx'])
         return moves
 
-    def check_win_for_player(self, board_state, player):
+    def check_win_for_player(self, board_state: Dict[str, Dict[str, int]], player: int) -> bool:
         """
         Checks if a specific player has won.
-        board_state is a dict like self.grid_state but can be modified for testing.
-        Returns True/False
+
+        Args:
+            board_state: A dictionary representing the board state (e.g., self.grid_state).
+            player: Player ID to check for win (1 or 2).
+
+        Returns:
+            True if player has achieved a winning line, False otherwise.
         """
         # We need to find which positions this player holds
         player_positions = [tuple(map(int, k.split(','))) for k, v in board_state.items() if v.get('player') == player]
@@ -195,21 +209,35 @@ class CubeViewer:
 
         return False
 
-    def check_draw_condition(self):
+    def check_draw_condition(self) -> bool:
+        """Check if the board is full (a draw condition)."""
         return len(self.grid_state) == 64
 
     # --- AI LOGIC STARTS HERE ---
 
-    MAX_DEPTH = 2  # Depth 2 is fast and competent. Depth 3 is smarter but slower.
+    MAX_DEPTH: int = 2  # Depth 2 is fast and competent. Depth 3 is smarter but slower.
 
-    def minimax(self, board, depth, alpha, beta, is_maximizing):
+    def minimax(self,
+                board: Dict[str, Dict[str, int]],
+                depth: int,
+                alpha: float,
+                beta: float,
+                is_maximizing: bool
+                ) -> Union[float, Tuple[float, Optional[Tuple[int, int, int]]]]:
         """
-        Minimax with Alpha-Beta Pruning
-        'board' is a copy of self.grid_state
-        AI is Player 2 (O)
-        Human is Player 1 (X)
-        """
+        Minimax with Alpha-Beta Pruning for AI move selection.
 
+        Args:
+            board: A copy of self.grid_state representing a game state to evaluate.
+            depth: Current search depth (0 is root).
+            alpha: Alpha cutoff value for pruning.
+            beta: Beta cutoff value for pruning.
+            is_maximizing: True if current turn is the AI (maximizing), False for human (minimizing).
+
+        Returns:
+            If depth == 0: tuple of (best_score, best_move)
+            Otherwise: heuristic score (float) at this branch.
+        """
         # Terminal States: Win or Draw
         if self.check_win_for_player(board, 2):
             return 10000 + depth  # Prefer faster wins
@@ -228,7 +256,7 @@ class CubeViewer:
 
         if is_maximizing:  # AI Turn (Maximize Score)
             max_eval = float('-inf')
-            best_move = None
+            best_move: Optional[Tuple[int, int, int]] = None
             for move in self.get_available_moves_for_board(board):
                 new_board = copy.deepcopy(board)
                 new_board[f"{move[0]},{move[1]},{move[2]}"] = {'player': 2}
@@ -242,7 +270,7 @@ class CubeViewer:
                 if beta <= alpha:
                     break
 
-            return max_eval if depth != 0 else (max_eval, best_move)
+            return (max_eval, best_move) if depth == 0 else max_eval
 
         else:  # Human Turn (Minimize Score)
             min_eval = float('inf')
@@ -257,19 +285,32 @@ class CubeViewer:
                     break
             return min_eval
 
-    def get_available_moves_for_board(self, board_state):
-        """Helper for AI to find moves in a specific board state copy"""
-        moves = []
+    def get_available_moves_for_board(self, board_state: Dict[str, Dict[str, int]]) -> List[Tuple[int, int, int]]:
+        """
+        Helper for AI to find moves in a specific board state copy.
+
+        Args:
+            board_state: A dictionary representing the game board.
+
+        Returns:
+            List of available (x, y, z) coordinate tuples.
+        """
+        moves: List[Tuple[int, int, int]] = []
         for cube in self.cubes:
             key = cube['key']
             if key not in board_state:
                 moves.append(cube['grid_idx'])
         return moves
 
-    def evaluate_board(self, board):
+    def evaluate_board(self, board: Dict[str, Dict[str, int]]) -> float:
         """
         Heuristic scoring function.
-        AI = 2 (Maximizing), Human = 1 (Minimizing)
+
+        Args:
+            board: Current game state to evaluate.
+
+        Returns:
+            Score where positive favors AI (Player 2), negative favors human (Player 1).
         """
         score = 0
 
@@ -343,8 +384,8 @@ class CubeViewer:
 
         return p2_score - p1_score
 
-    def make_ai_move(self):
-        """Called when it's AI's turn"""
+    def make_ai_move(self) -> None:
+        """Called when it's AI's turn; computes optimal move and executes it."""
         self.aiThinking = True
 
         # Run Minimax
@@ -381,7 +422,7 @@ class CubeViewer:
 
     # --- Drawing & Input ---
 
-    def get_effective_camera(self):
+    def get_effective_camera(self) -> Dict[str, float | int]:
         """Returns dict of current camera values, updating self.angle_* if animating."""
         if not self.animating_view:
             # No animation: use stored state directly
@@ -411,7 +452,7 @@ class CubeViewer:
         # Still animating → interpolate
         t = elapsed_ms / self.anim_duration_ms
 
-        def lerp(a, b):
+        def lerp(a: float, b: float) -> float:
             return a + (b - a) * t
 
         current = {
@@ -431,8 +472,16 @@ class CubeViewer:
 
         return current
 
-    def project(self, point):
-        """Projects a 3D world point to 2D screen using the *actual* camera state (animated or not)."""
+    def project(self, point: np.ndarray) -> np.ndarray:
+        """
+        Projects a 3D world point to 2D screen using the *actual* camera state (animated or not).
+
+        Args:
+            point: 3D numpy array [x, y, z] representing a position in world space.
+
+        Returns:
+            2D numpy array [screen_x, screen_y] in pixel coordinates.
+        """
         x, y, z = point
 
         # Get current effective camera (always up-to-date)
@@ -459,11 +508,17 @@ class CubeViewer:
             cam['pan_y'] - iso_y * cam['zoom_level']
         ], dtype=float)
 
-    def compute_depth_factor(self, pos):
+    def compute_depth_factor(self, pos: np.ndarray) -> float:
         """
         Returns a value between 0.0 (closest) and ~0.7 (farthest)
         to darken distant cubes — helps depth perception.
         Based on actual 3D Z-position after rotation.
+
+        Args:
+            pos: 3D position in world space [x, y, z].
+
+        Returns:
+            Depth factor between 0.0 and 0.7 (higher = farther away).
         """
         # Project the point fully (including Z in screen space)
         x, y, z = pos
@@ -488,7 +543,20 @@ class CubeViewer:
         # Darken from 0% to ~70%: darkness increases with depth (t)
         return t * 0.7
 
-    def draw_player_piece(self, center_2d, player_num, override_color=None, depth_factor=0.0):
+    def draw_player_piece(self,
+                          center_2d: np.ndarray,
+                          player_num: int,
+                          override_color: Optional[Tuple[int, int, int]] = None,
+                          depth_factor: float = 0.0) -> None:
+        """
+        Draws the X or O piece at a given projected position.
+
+        Args:
+            center_2d: Projected (x,y) screen coordinates.
+            player_num: Player ID (1 or 2).
+            override_color: Optional color to use instead of default.
+            depth_factor: Amount of darkening due to perspective (0.0 to ~0.7).
+        """
         char = 'X' if player_num == 1 else 'O'
 
         # Use provided color if given; otherwise compute it as before (fallback)
@@ -522,7 +590,13 @@ class CubeViewer:
         rect = text_surf.get_rect(center=(int(center_2d[0]), int(center_2d[1])))
         self.screen.blit(text_surf, rect)
 
-    def draw_ghost(self, center_2d):
+    def draw_ghost(self, center_2d: np.ndarray) -> None:
+        """
+        Draws a semi-transparent ghost of the current player's piece at a projected position.
+
+        Args:
+            center_2d: Projected (x,y) screen coordinates for the ghost.
+        """
         if self.game_over:
             return
 
@@ -538,18 +612,20 @@ class CubeViewer:
             font = pygame.font.Font(None, font_size)
 
         text_surf = font.render(char, True, color)
-        text_surf.set_alpha(180)
+        text_surf.set_alpha(180)  # Make transparent
 
         rect = text_surf.get_rect(center=(int(center_2d[0]), int(center_2d[1])))
         self.screen.blit(text_surf, rect)
 
-    def set_view(self, preset='math', animate=False):
+    def set_view(self,
+                 preset: Union[str, Dict[str, Any]] = 'math',
+                 animate: bool = False) -> None:
         """
         Sets camera view (optionally with animation).
 
         Args:
-            preset: 'math' | 'classic_isometric' | 'toggle' | custom dict
-            animate: if True, interpolates over self.anim_duration_ms (0.5s)
+            preset: View preset ('math', 'classic_isometric', 'toggle') or custom dict.
+            animate: If True, interpolates over self.anim_duration_ms (0.5s).
         """
         # Belt and Braces!
         if not hasattr(self, 'current_view'):  # first-time setup
@@ -559,8 +635,8 @@ class CubeViewer:
         if isinstance(preset, str):
             if preset == 'toggle':
                 self.current_view = ('classic_isometric'
-                               if self.current_view == 'math'
-                               else 'math')
+                                     if self.current_view == 'math'
+                                     else 'math')
                 target = self.view_presets[self.current_view]
             elif preset in self.view_presets:
                 target = self.view_presets[preset]
@@ -594,8 +670,13 @@ class CubeViewer:
             self.pan_y = int(target['pan_y'])
             self.zoom_level = float(target['zoom_level'])
 
-    def get_animated_view(self):
-        """Returns dict of current animated camera state (lerp between initial and target)."""
+    def get_animated_view(self) -> Dict[str, float | int]:
+        """
+        Returns dict of current animated camera state (lerp between initial and target).
+
+        Returns:
+            Dictionary containing the interpolated camera values.
+        """
         if not self.animating_view:
             return {
                 'angle_y': self.angle_y,
@@ -614,7 +695,7 @@ class CubeViewer:
 
         t = elapsed_ms / self.anim_duration_ms  # progress: 0.0 → 1.0
 
-        def lerp(a, b):  # Linear Interpolation
+        def lerp(a: float, b: float) -> float:
             return a + (b - a) * t
 
         return {
@@ -625,7 +706,13 @@ class CubeViewer:
             'zoom_level': lerp(self.anim_initial['zoom_level'], self.anim_target['zoom_level'])
         }
 
-    def draw_cube(self, cube):
+    def draw_cube(self, cube: Dict[str, Any]) -> None:
+        """
+        Draws a single cube (either empty or with a piece) based on its state.
+
+        Args:
+            cube: Cube data dictionary containing 'pos', 'key', and 'grid_idx'.
+        """
         pos = cube['pos']
 
         if cube['key'] in self.grid_state:
@@ -716,8 +803,11 @@ class CubeViewer:
                                    base_radius)
                 pygame.draw.circle(self.screen, dark_color, tuple(map(int, center_2d)), base_radius)
 
-    def draw_axes(self):
-        """Draws world-aligned axes: X=red, Y=green, Z=blue + labels"""
+    def draw_axes(self) -> None:
+        """
+        Draws world-aligned axes: X=red, Y=green, Z=blue + labels.
+        Only draws if self.show_axes is True.
+        """
         if not self.show_axes:
             return
 
@@ -750,7 +840,7 @@ class CubeViewer:
         pygame.draw.line(self.screen, z_color, tuple(map(int, o_2d)), tuple(map(int, z_2d)), line_width)
 
         # Helper to draw arrowhead (same as before)
-        def draw_arrowhead(center, end_point, color):
+        def draw_arrowhead(center: np.ndarray, end_point: np.ndarray, color: Tuple[int, int, int]) -> None:
             vec = np.array(end_point) - np.array(center)
             length = math.hypot(*vec)
             if length < 5:
@@ -785,7 +875,8 @@ class CubeViewer:
             font = pygame.font.Font(None, int(24 * self.zoom_level))
 
         # Helper to compute label position & darkness (if desired)
-        def render_axis_label(text, tip_pos, color):
+        def render_axis_label(text: str, tip_pos: np.ndarray, color: Tuple[int, int, int]) -> Optional[
+            Tuple[pygame.Surface, pygame.Rect]]:
             # Direction vector from origin to tip
             vec = np.array(tip_pos) - np.array(o_2d)
             length = math.hypot(*vec)
@@ -849,7 +940,8 @@ class CubeViewer:
         o_radius = max(3, int(CUBE_SIZE * 0.15 * self.zoom_level))
         pygame.draw.circle(self.screen, (255, 255, 255), tuple(map(int, o_2d)), o_radius)
 
-    def draw_guide_lines(self):
+    def draw_guide_lines(self) -> None:
+        """Draws light grid lines connecting cubes for visual reference."""
         line_color = COLORS['grid_lines']
         for cube in self.cubes:
             pos = cube['pos']
@@ -870,7 +962,16 @@ class CubeViewer:
                 p1_2d, p2_2d = self.project(pos), self.project(next_pos)
                 pygame.draw.line(self.screen, line_color, tuple(map(int, p1_2d)), tuple(map(int, p2_2d)), 1)
 
-    def check_win_condition(self, x, y, z):
+    def check_win_condition(self, x: int, y: int, z: int) -> int:
+        """
+        Checks if the move at (x,y,z) results in a win.
+
+        Args:
+            x, y, z: Grid coordinates of the last placed piece.
+
+        Returns:
+            Player ID (1 or 2) if they won, otherwise 0.
+        """
         p = self.grid_state[f"{x},{y},{z}"]["player"]
         directions = [
             (1, 0, 0), (0, 1, 0), (0, 0, 1),
@@ -911,7 +1012,8 @@ class CubeViewer:
                 return p
         return 0
 
-    def handle_input(self):
+    def handle_input(self) -> None:
+        """Handles keyboard input for camera controls, game mode toggling, etc."""
         keys = pygame.key.get_pressed()
 
         # Camera Controls (cursor keys)
@@ -981,8 +1083,8 @@ class CubeViewer:
                 if hasattr(self, '_view_reset_pressed'):
                     del self._view_reset_pressed
 
-    def handle_mouse_click(self):
-        """A dedicated method to handle mouse clicks for any human player"""
+    def handle_mouse_click(self) -> None:
+        """Handles mouse clicks for placing pieces."""
         if self.game_over or self.aiThinking:
             return
 
@@ -994,7 +1096,7 @@ class CubeViewer:
         # But since we want this generic, let's assume you call it from within the event loop
 
         best_dist_sq = float('inf')
-        target_cube = None
+        target_cube: Optional[Dict[str, Any]] = None
         mouse_pos = pygame.mouse.get_pos()
 
         for cube in self.cubes:
@@ -1017,8 +1119,13 @@ class CubeViewer:
                 x, y, z = target_cube['grid_idx']
                 self.apply_move(x, y, z)
 
-    def apply_move(self, x, y, z):
-        """Centralized logic to place a piece and check game state"""
+    def apply_move(self, x: int, y: int, z: int) -> None:
+        """
+        Applies a player's move and updates game state accordingly.
+
+        Args:
+            x, y, z: Grid coordinates of the move.
+        """
         key = f"{x},{y},{z}"
         player_num = 1 if self.current_player == 1 else 2
 
@@ -1053,7 +1160,8 @@ class CubeViewer:
         if not self.game_over:
             self.current_player = 2 if self.current_player == 1 else 1
 
-    def toggle_mode(self):
+    def toggle_mode(self) -> None:
+        """Toggles between PvP and PvAI modes, resetting the game."""
         if self.mode == 'PvP':
             self.mode = 'PvAI'
         else:
@@ -1061,9 +1169,10 @@ class CubeViewer:
         self.game_over = True
         self.reset_game()  # Reset on mode switch
 
-    def reset_game(self):
+    def reset_game(self) -> None:
+        """Resets the game state and camera for a new game."""
         # ✅ Reset camera to clean view
-        self.set_view(self.current_view, animate=True)   # ← animate the reset!
+        self.set_view(self.current_view, animate=True)  # ← animate the reset!
 
         if self.game_over:
             self.grid_state.clear()
@@ -1074,8 +1183,15 @@ class CubeViewer:
             self.aiThinking = False
             self.winning_line_coords = []  # ✅ Reset winning line coords
 
-    def run(self):
-        running = True
+    def run(self) -> None:
+        """
+        Main game loop.
+
+        Handles event processing, updating game logic,
+        rendering the scene, and drawing UI elements.
+        Runs until the user closes the window.
+        """
+        running: bool = True
         font_win = pygame.font.SysFont("Arial", 32, bold=True)
         font_hud = pygame.font.SysFont("Arial", 20, bold=True)
         small_font = pygame.font.SysFont("Arial", 16, bold=False)
@@ -1084,7 +1200,7 @@ class CubeViewer:
         RIGHT_PANEL_WIDTH = 250
 
         # Initialize hover outside the loop
-        self.hovered_cube_pos = None
+        self.hovered_cube_pos: Optional[np.ndarray] = None
 
         while running:
             self.clock.tick(FPS)
@@ -1101,7 +1217,7 @@ class CubeViewer:
                     # Hover effect logic
                     mouse_pos = event.pos
                     best_dist_sq = float('inf')
-                    target_cube = None
+                    target_cube: Optional[Dict[str, Any]] = None
                     for cube in self.cubes:
                         center_screen = self.project(cube['pos'])
                         if center_screen is None:
@@ -1139,7 +1255,7 @@ class CubeViewer:
             #    - Used for correct Painter's Algorithm ordering + shading
             # =============================================================
 
-            depth_map = {}
+            depth_map: Dict[str, Dict[str, float]] = {}
 
             for cube in self.cubes:
                 x, y, z = cube['pos']
@@ -1246,7 +1362,7 @@ class CubeViewer:
                         (self.mode == 'PvAI' and self.current_player == 1) or
                         (self.mode == 'PvP')
                 ):
-                    hover_cube = None
+                    hover_cube: Optional[Dict[str, Any]] = None
                     for cube in sorted_cubes:  # same order as drawing
                         pos = cube['pos']
                         center_2d = self.project(pos)
@@ -1380,5 +1496,5 @@ class CubeViewer:
 
 
 if __name__ == "__main__":
-    viewer = CubeViewer()
+    viewer: CubeViewer = CubeViewer()
     viewer.run()
