@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 4x4x4 Tic-Tac-Toe</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars */
+            background-color: #202025;
+            font-family: 'Arial', sans-serif;
+            color: #dcdcdc;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        /* UI Overlay Styling */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Let clicks pass through to canvas */
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .panel {
+            background-color: rgba(35, 35, 45, 0.85);
+            padding: 20px;
+            border-radius: 10px;
+            pointer-events: auto; /* Re-enable clicks for buttons */
+            backdrop-filter: blur(5px);
+        }
+
+        .left-panel {
+            position: absolute;
+            left: 20px;
+            bottom: 50px;
+            width: 280px;
+        }
+
+        .right-panel {
+            position: absolute;
+            right: 20px;
+            bottom: 100px;
+            width: 250px;
+        }
+
+        h2, h3 { margin-top: 0; color: #fff; }
+
+        .controls-list { font-size: 14px; line-height: 1.6; color: #c8c8c8; }
+        .highlight { color: #32ff9e; }
+
+        .score-item { margin-bottom: 8px; }
+        .p1-score { color: rgb(255, 80, 80); font-weight: bold; }
+        .p2-score { color: rgb(80, 140, 255); font-weight: bold; }
+
+        #game-message {
+            position: absolute;
+            top: 20%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            pointer-events: none;
+        }
+
+        .big-text {
+            font-size: 48px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 2px 2px 0 #000;
+        }
+
+        .turn-indicator {
+            margin-top: 10px;
+            font-size: 24px;
+            color: white;
+        }
+
+        button {
+            background-color: #50a5ff;
+            border: none;
+            padding: 10px 20px;
+            color: white;
+            font-weight: bold;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 10px;
+            font-size: 16px;
+            pointer-events: auto;
+        }
+        button:hover { background-color: #3a8dff; }
+
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- UI Layer -->
+    <div id="ui-layer">
+        <!-- Left Panel: Controls -->
+        <div class="panel left-panel">
+            <h2>Controls</h2>
+            <div class="controls-list">
+                &larr;&rarr; : Rotate View (Y-Axis)<br>
+                &uarr;&darr; : Rotate View (X-Axis)<br>
+                W / S : Pan Up / Down<br>
+                A / D : Pan Left / Right<br>
+                Z / Shift+Z : Zoom In / Out<br>
+                R / Home : Reset Camera / New Game<br>
+                V : Toggle View (Math / Isometric)<br>
+                Ctrl+R : Toggle Axes<br>
+                <br>
+                Current Mode: <span id="mode-display" class="highlight">PvP</span><br>
+                M : Switch Mode
+            </div>
+        </div>
+
+        <!-- Right Panel: Scoreboard -->
+        <div class="panel right-panel">
+            <h3>Scoreboard</h3>
+            <div class="score-item p1-score" id="p1-score">Player 1 (X): 0 Wins</div>
+            <div class="score-item p2-score" id="p2-score">Player 2 (O): 0 Wins</div>
+            <div class="score-item" style="color: #ccc;" id="draws-score">Draws: 0</div>
+            <button id="reset-btn">New Game</button>
+        </div>
+
+        <!-- Center Message -->
+        <div id="game-message">
+            <div id="message-text" class="big-text"></div>
+            <div id="turn-display" class="turn-indicator"></div>
+        </div>
+    </div>
+
+<script>
+/**
+ * 3D Tic-Tac-Toe Web Version
+ * Ported from Python/Pygame to JavaScript/Canvas
+ */
+
+// -------------------------
+// CONFIGURATION & CONSTANTS
+// -------------------------
+
+const FPS = 60;
+const WIDTH = 1200;
+const HEIGHT = 950;
+
+const CUBE_SIZE = 40;
+const GAP_SIZE = 18;
+const SPACING = CUBE_SIZE + GAP_SIZE;
+
+const ROTATION_SPEED = 0.02;
+const PAN_SPEED = 6;
+const ZOOM_STEP = 0.95;
+const ZOOM_IN_FACTOR = 1.1;
+
+const COLORS = {
+    'bg': [32, 32, 37],
+    'dot_inactive': [140, 170, 220],
+    'dot_shadow': [30, 35, 50],
+    'p1_color': [255, 80, 80], // X - Red/Coral
+    'p2_color': [80, 140, 255], // O - Blue
+    'flash_active': [255, 255, 255],
+    'ghost_color': [255, 230, 80],
+    'ui_panel_bg': [35, 35, 45],
+    'text_color': [220, 220, 220],
+    'grid_lines': [60, 60, 70, 50], // RGB + Alpha
+    'ai_thinking': [80, 200, 80]
+};
+
+// Vector Math Helper Class (Replacing numpy)
+class Vec3 {
+    constructor(x, y, z) { this.x = x; this.y = y; this.z = z; }
+    add(v) { return new Vec3(this.x + v.x, this.y + v.y, this.z + v.z); }
+    sub(v) { return new Vec3(this.x - v.x, this.y - v.y, this.z - v.z); }
+    mult(s) { return new Vec3(this.x * s, this.y * s, this.z * s); }
+}
+
+// -------------------------
+// GAME STATE & LOGIC
+// -------------------------
+
+class CubeViewer {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+
+        // Set canvas size
+        this.resize();
+        window.addEventListener('resize', () => this.resize());
+
+        // Game State
+        this.mode = 'PvP';
+        this.currentPlayer = 1;
+        this.gridState = {}; // Key: "x,y,z", Value: {player: int}
+        this.player1Wins = 0;
+        this.player2Wins = 0;
+        this.draws = 0;
+
+        this.hoveredCubePos = null;
+        this.gameOver = false;
+        this.winner = null; // 1, 2, "Draw"
+        this.flashTimer = 0;
+        this.flashPhase = true;
+        this.winningLineCoords = [];
+
+        // AI State
+        this.aiThinking = false;
+
+        // Camera Setup
+        this.viewPresets = {
+            'math': { angleY: -5 * Math.PI / 12, angleX: 0.0, panX: WIDTH / 2, panY: HEIGHT / 2 - 50, zoom: 1.2 },
+            'classic_isometric': { angleY: Math.PI / 4, angleX: Math.atan(Math.sqrt(2) / 2), panX: WIDTH / 2, panY: HEIGHT / 2 - 50, zoom: 1.0 }
+        };
+
+        this.currentView = 'math';
+        this.angleY = this.viewPresets['math'].angleY;
+        this.angleX = this.viewPresets['math'].angleX;
+        this.panX = this.viewPresets['math'].panX;
+        this.panY = this.viewPresets['math'].panY;
+        this.zoomLevel = this.viewPresets['math'].zoom;
+
+        this.showAxes = true;
+
+        // Animation State
+        this.animatingView = false;
+        this.animStartTime = null;
+        this.animDurationMs = 500;
+        this.animTarget = {};
+        this.animInitial = {};
+
+        this.initGrid();
+        this.setupInputs();
+        this.lastTime = performance.now();
+
+        requestAnimationFrame((t) => this.gameLoop(t));
+    }
+
+    resize() {
+        // Handle High DPI Displays
+        const dpr = window.devicePixelRatio || 1;
+        this.canvas.width = WIDTH * dpr;
+        this.canvas.height = HEIGHT * dpr;
+        this.ctx.scale(dpr, dpr);
+        // Keep canvas CSS size fixed to avoid stretching
+        this.canvas.style.width = `${WIDTH}px`;
+        this.canvas.style.height = `${HEIGHT}px`;
+    }
+
+    initGrid() {
+        const offset = -(4 - 1) * SPACING / 2.0;
+        this.cubes = [];
+        for (let x = 0; x < 4; x++) {
+            for (let y = 0; y < 4; y++) {
+                for (let z = 0; z < 4; z++) {
+                    const pos = new Vec3(
+                        offset + x * SPACING,
+                        offset + y * SPACING,
+                        offset + z * SPACING
+                    );
+                    this.cubes.push({
+                        pos: pos,
+                        key: `${x},${y},${z}`,
+                        gridIdx: [x, y, z]
+                    });
+                }
+            }
+        }
+    }
+
+    // --- Core Logic ---
+
+    getAvailableMoves() {
+        return this.cubes.filter(c => !this.gridState.hasOwnProperty(c.key)).map(c => c.gridIdx);
+    }
+
+    checkWinForPlayer(boardState, player) {
+        const playerPositions = Object.keys(boardState)
+            .filter(k => boardState[k].player === player)
+            .map(k => k.split(',').map(Number));
+
+        const directions = [
+            [1, 0, 0], [0, 1, 0], [0, 0, 1],
+            [1, 1, 0], [1, -1, 0], [1, 0, 1], [1, 0, -1], [0, 1, 1], [0, 1, -1],
+            [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1]
+        ];
+
+        for (const [x, y, z] of playerPositions) {
+            for (const [dx, dy, dz] of directions) {
+                let linePoints = [[x, y, z]];
+
+                // Check positive
+                let i = 1;
+                while (true) {
+                    const nx = x + dx * i, ny = y + dy * i, nz = z + dz * i;
+                    if (nx >= 0 && nx < 4 && ny >= 0 && ny < 4 && nz >= 0 && nz < 4) {
+                        const key = `${nx},${ny},${nz}`;
+                        if (boardState[key] && boardState[key].player === player) {
+                            linePoints.push([nx, ny, nz]);
+                            i++;
+                        } else break;
+                    } else break;
+                }
+
+                // Check negative
+                i = 1;
+                while (true) {
+                    const nx = x - dx * i, ny = y - dy * i, nz = z - dz * i;
+                    if (nx >= 0 && nx < 4 && ny >= 0 && ny < 4 && nz >= 0 && nz < 4) {
+                        const key = `${nx},${ny},${nz}`;
+                        if (boardState[key] && boardState[key].player === player) {
+                            linePoints.push([nx, ny, nz]);
+                            i++;
+                        } else break;
+                    } else break;
+                }
+
+                if (linePoints.length >= 4) return true;
+            }
+        }
+        return false;
+    }
+
+    checkDrawCondition() { return Object.keys(this.gridState).length === 64; }
+
+    // --- AI LOGIC (Minimax) ---
+
+    MAX_DEPTH = 2;
+
+    minimax(board, depth, alpha, beta, isMaximizing) {
+        if (this.checkWinForPlayer(board, 2)) return 10000 + depth;
+        if (this.checkWinForPlayer(board, 1)) return -10000 - depth;
+        if (Object.keys(board).length === 64) return 0;
+
+        if (depth >= this.MAX_DEPTH) return this.evaluateBoard(board);
+
+        const moves = Object.keys(board).map(k => k.split(',').map(Number)); // Not used directly in logic below like Python
+        // Logic adjustment for empty board start
+        if (moves.length === 0 && depth === 0) {
+             return [this.minimax({}, 1, alpha, beta, true), [1,1,1]]; // Fallback for empty
+        }
+        if (moves.length === 0 && !isMaximizing && depth > 0) {
+            return -500;
+        }
+
+        let bestMove = null;
+
+        const availableMoves = this.getAvailableMovesForBoard(board);
+
+        if (isMaximizing) { // AI Turn
+            let maxEval = -Infinity;
+            for (const move of availableMoves) {
+                const newBoard = JSON.parse(JSON.stringify(board));
+                newBoard[`${move[0]},${move[1]},${move[2]}`] = { player: 2 };
+                const evalScore = this.minimax(newBoard, depth + 1, alpha, beta, false);
+                if (evalScore > maxEval) {
+                    maxEval = evalScore;
+                    bestMove = move;
+                }
+                alpha = Math.max(alpha, evalScore);
+                if (beta <= alpha) break;
+            }
+            return depth === 0 ? [maxEval, bestMove] : maxEval;
+
+        } else { // Human Turn
+            let minEval = Infinity;
+            for (const move of availableMoves) {
+                const newBoard = JSON.parse(JSON.stringify(board));
+                newBoard[`${move[0]},${move[1]},${move[2]}`] = { player: 1 };
+                const evalScore = this.minimax(newBoard, depth + 1, alpha, beta, true);
+                minEval = Math.min(minEval, evalScore);
+                beta = Math.min(beta, evalScore);
+                if (beta <= alpha) break;
+            }
+            return minEval;
+        }
+    }
+
+    getAvailableMovesForBoard(boardState) {
+        return this.cubes.filter(c => !boardState.hasOwnProperty(c.key)).map(c => c.gridIdx);
+    }
+
+    evaluateBoard(board) {
+        let score = 0;
+        const directions = [
+            [1, 0, 0], [0, 1, 0], [0, 0, 1],
+            [1, 1, 0], [1, -1, 0], [1, 0, 1], [1, 0, -1], [0, 1, 1], [0, 1, -1],
+            [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1]
+        ];
+
+        const linesFound = new Set();
+
+        for (let x=0; x<4; x++) {
+            for (let y=0; y<4; y++) {
+                for (let z=0; z<4; z++) {
+                    for (const [dx,dy,dz] of directions) {
+                        const lineCoords = [];
+                        let validLine = true;
+                        for (let i=0; i<4; i++) {
+                            const nx=x+dx*i, ny=y+dy*i, nz=z+dz*i;
+                            if (nx>=0 && nx<4 && ny>=0 && ny<4 && nz>=0 && nz<4) lineCoords.push([nx,ny,nz]);
+                            else { validLine = false; break; }
+                        }
+                        if (validLine) {
+                            const sortedCoords = JSON.stringify(lineCoords.sort());
+                            if (!linesFound.has(sortedCoords)) {
+                                linesFound.add(sortedCoords);
+                                let p2Count=0, p1Count=0, emptyCount=0;
+                                for (const [cx,cy,cz] of lineCoords) {
+                                    const key = `${cx},${cy},${cz}`;
+                                    if (board[key]?.player === 2) p2Count++;
+                                    else if (board[key]?.player === 1) p1Count++;
+                                    else emptyCount++;
+                                }
+                                if (p2Count===4) score += 10000;
+                                else if (p2Count===3 && emptyCount===1) score += 100;
+                                else if (p2Count===2 && emptyCount===2) score += 10;
+
+                                if (p1Count===4) score -= 10000;
+                                else if (p1Count===3 && emptyCount===1) score -= 90;
+                                else if (p1Count===2 && emptyCount===2) score -= 5;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return score;
+    }
+
+    makeAiMove() {
+        this.aiThinking = true;
+        document.getElementById('turn-display').innerText = "AI is thinking...";
+
+        // Use setTimeout to allow UI to update before heavy calculation
+        setTimeout(() => {
+            const result = this.minimax(JSON.parse(JSON.stringify(this.gridState)), 0, -Infinity, Infinity, true);
+            if (result && result[1]) {
+                const [bestScore, bestMove] = result;
+                this.applyMove(bestMove[0], bestMove[1], bestMove[2]);
+            }
+
+            // If minimax returned undefined (shouldn't happen with valid grid), try a random move
+            if (!result || !result[1]) {
+                 const moves = this.getAvailableMoves();
+                 if(moves.length > 0) {
+                     const randMove = moves[Math.floor(Math.random() * moves.length)];
+                     this.applyMove(randMove[0], randMove[1], randMove[2]);
+                 }
+            }
+
+            this.aiThinking = false;
+        }, 50);
+    }
+
+    // --- Drawing & Helpers ---
+
+    getEffectiveCamera() {
+        if (!this.animatingView) {
+            return { angleY: this.angleY, angleX: this.angleX, panX: this.panX, panY: this.panY, zoom: this.zoomLevel };
+        }
+
+        const now = performance.now();
+        const elapsed = now - this.animStartTime;
+        if (elapsed >= this.animDurationMs) {
+            this.animatingView = false;
+            // Snap to target
+            this.angleY = this.animTarget.angleY;
+            this.angleX = this.animTarget.angleX;
+            this.panX = this.animTarget.panX;
+            this.panY = this.animTarget.panY;
+            this.zoomLevel = this.animTarget.zoom;
+            return this.animTarget;
+        }
+
+        const t = elapsed / this.animDurationMs;
+
+        function lerp(a, b) { return a + (b - a) * t; }
+
+        const current = {
+            angleY: lerp(this.animInitial.angleY, this.animTarget.angleY),
+            angleX: lerp(this.animInitial.angleX, this.animTarget.angleX),
+            panX: lerp(this.animInitial.panX, this.animTarget.panX),
+            panY: lerp(this.animInitial.panY, this.animTarget.panY),
+            zoom: lerp(this.animInitial.zoom, this.animTarget.zoom)
+        };
+
+        // Update stored state in real-time for project() to use
+        this.angleY = current.angleY;
+        this.angleX = current.angleX;
+        this.panX = current.panX;
+        this.panY = current.panY;
+        this.zoomLevel = current.zoom;
+
+        return current;
+    }
+
+    project(point) {
+        const cam = this.getEffectiveCamera();
+        const cy = Math.cos(cam.angleY);
+        const sy = Math.sin(cam.angleY);
+        const cx = Math.cos(cam.angleX);
+        const sx = Math.sin(cam.angleX);
+
+        // Rotate around Y
+        const x1 = point.x * cy - point.z * sy;
+        const z1 = point.x * sy + point.z * cy;
+
+        // Flip Y to match canvas coordinates (Up is negative Y)
+        const y2 = (-point.y) * cx - z1 * sx;
+        const z2 = (-point.y) * sx + z1 * cx;
+
+        const isoX = (x1 - z2) * Math.cos(Math.PI / 6); // cos(30deg)
+        const isoY = (x1 + z2) * Math.sin(Math.PI / 6) - y2; // sin(30deg)
+
+        return {
+            x: cam.panX + isoX * cam.zoom,
+            y: cam.panY - isoY * cam.zoom
+        };
+    }
+
+    computeDepthFactor(pos) {
+        const cy = Math.cos(this.angleY); sy = Math.sin(this.angleY);
+        const cx = Math.cos(this.angleX); sx = Math.sin(this.angleX);
+
+        const x1 = pos.x * cy - pos.z * sy;
+        const z1 = pos.x * sy + pos.y * cy; // Note: Logic adjusted slightly for JS compatibility
+        // Re-calculating strictly based on Python logic:
+        const x1_p = pos.x * cy - pos.z * sy;
+        const z1_p = pos.x * sy + pos.z * cy;
+
+        const y2_p = (-pos.y) * cx - z1_p * sx; // python had y flipped for rotation
+        const z2_p = (-pos.y) * sx + z1_p * cx;
+
+        const rangeMin = -SPACING * 2.0;
+        const rangeMax = SPACING * 1.0;
+        let t = (z2_p - rangeMin) / (rangeMax - rangeMin);
+        t = Math.max(0, Math.min(1, t));
+        return t * 0.7;
+    }
+
+    drawPlayerPiece(center, playerNum, overrideColor = null, depthFactor = 0.0) {
+        const char = playerNum === 1 ? 'X' : 'O';
+        let baseColor;
+
+        if (overrideColor) {
+            baseColor = overrideColor;
+        } else {
+            if (this.gameOver && this.flashTimer > 0) {
+                baseColor = this.flashPhase ? COLORS['flash_active'] : (playerNum === 1 ? COLORS['p1_color'] : COLORS['p2_color']);
+            } else {
+                baseColor = playerNum === 1 ? COLORS['p1_color'] : COLORS['p2_color'];
+            }
+        }
+
+        // Apply depth darkening
+        const r = Math.max(0, Math.floor(baseColor[0] * (1 - depthFactor)));
+        const g = Math.max(0, Math.floor(baseColor[1] * (1 - depthFactor)));
+        const b = Math.max(0, Math.floor(baseColor[2] * (1 - depthFactor)));
+
+        this.ctx.fillStyle = `rgb(${r},${g},${b})`;
+
+        // Font sizing
+        const baseSize = Math.floor(CUBE_SIZE * 0.85 * this.zoomLevel);
+        const fontSize = Math.max(32, baseSize);
+        this.ctx.font = `bold ${fontSize}px Arial`;
+
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+
+        // Shadow
+        this.ctx.fillStyle = "rgba(0,0,0,0.5)";
+        this.ctx.fillText(char, center.x + 2, center.y + 2);
+
+        // Main Text
+        this.ctx.fillStyle = `rgb(${r},${g},${b})`;
+        this.ctx.fillText(char, center.x, center.y);
+    }
+
+    drawGhost(center) {
+        if (this.gameOver || this.aiThinking) return;
+
+        const char = this.currentPlayer === 1 ? 'X' : 'O';
+        let ghostColor = COLORS['ghost_color'];
+
+        // Darken slightly
+        ghostColor = [
+            Math.floor(ghostColor[0] * 0.9),
+            Math.floor(ghostColor[1] * 0.9),
+            Math.floor(ghostColor[2] * 0.9)
+        ];
+
+        this.ctx.fillStyle = `rgba(${ghostColor[0]},${ghostColor[1]},${ghostColor[2]},0.7)`;
+
+        const baseSize = Math.floor(CUBE_SIZE * 0.7 * this.zoomLevel);
+        const fontSize = Math.max(25, baseSize);
+        this.ctx.font = `bold ${fontSize}px Arial`;
+
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(char, center.x, center.y);
+    }
+
+    setView(preset = 'math', animate = false) {
+        let target;
+        if (typeof preset === 'string') {
+            if (preset === 'toggle') {
+                this.currentView = this.currentView === 'math' ? 'classic_isometric' : 'math';
+                target = this.viewPresets[this.currentView];
+            } else if (this.viewPresets[preset]) {
+                target = this.viewPresets[preset];
+            } else {
+                console.warn("Unknown preset");
+                target = this.viewPresets['math'];
+            }
+        }
+
+        if (animate) {
+            this.animStartTime = performance.now();
+            this.animInitial = { angleY: this.angleY, angleX: this.angleX, panX: this.panX, panY: this.panY, zoom: this.zoomLevel };
+            this.animTarget = JSON.parse(JSON.stringify(target));
+            this.animatingView = true;
+        } else {
+            this.angleY = target.angleY;
+            this.angleX = target.angleX;
+            this.panX = target.panX;
+            this.panY = target.panY;
+            this.zoomLevel = target.zoom;
+        }
+    }
+
+    drawCube(cube) {
+        const pos = cube.pos;
+        const center2d = this.project(pos);
+
+        if (this.gridState[cube.key]) {
+            // Filled Cell
+            const state = this.gridState[cube.key];
+
+            let isWinningCube = false;
+            if (this.gameOver && this.flashTimer > 0) {
+                // Check if this cube is in winning line
+                const gridIdxTuple = JSON.stringify(cube.gridIdx);
+                const winCoordsSerialized = this.winningLineCoords.map(c => JSON.stringify(c));
+                if (winCoordsSerialized.includes(gridIdxTuple)) {
+                    isWinningCube = true;
+                }
+            }
+
+            let baseColor = state.player === 1 ? COLORS['p1_color'] : COLORS['p2_color'];
+
+            if (isWinningCube) {
+                const finalColor = this.flashPhase ? COLORS['flash_active'] : baseColor;
+                this.drawPlayerPiece(center2d, state.player, finalColor);
+            } else {
+                this.drawPlayerPiece(center2d, state.player);
+            }
+
+        } else {
+            // Empty Cell
+            let isHovered = false;
+
+            if (!this.gameOver && !this.aiThinking) {
+                let allowHover = true;
+                if (this.mode === 'PvAI' && this.currentPlayer !== 1) allowHover = false;
+
+                if (allowHover && this.hoveredCubePos &&
+                    Math.abs(this.hoveredCubePos.x - pos.x) < 0.1 &&
+                    Math.abs(this.hoveredCubePos.y - pos.y) < 0.1 &&
+                    Math.abs(this.hoveredCubePos.z - pos.z) < 0.1) {
+                    isHovered = true;
+                }
+            }
+
+            if (isHovered) {
+                this.drawGhost(center2d);
+            } else {
+                // Draw Dot
+                const depthFactor = this.computeDepthFactor(pos);
+                const baseColor = COLORS['dot_inactive'];
+
+                const r = Math.max(0, Math.floor(baseColor[0] * (1 - depthFactor)));
+                const g = Math.max(0, Math.floor(baseColor[1] * (1 - depthFactor)));
+                const b = Math.max(0, Math.floor(baseColor[2] * (1 - depthFactor)));
+
+                const shadowColor = COLORS['dot_shadow'];
+                const sr = Math.max(0, Math.floor(shadowColor[0] * (1 - depthFactor * 0.8)));
+                const sg = Math.max(0, Math.floor(shadowColor[1] * (1 - depthFactor * 0.8)));
+                const sb = Math.max(0, Math.floor(shadowColor[2] * (1 - depthFactor * 0.8)));
+
+                this.ctx.fillStyle = `rgb(${sr},${sg},${sb})`;
+                this.ctx.beginPath();
+                this.ctx.arc(center2d.x + 2, center2d.y + 2, CUBE_SIZE * 0.20 * this.zoomLevel, 0, Math.PI*2);
+                this.ctx.fill();
+
+                this.ctx.fillStyle = `rgb(${r},${g},${b})`;
+                this.ctx.beginPath();
+                this.ctx.arc(center2d.x, center2d.y, CUBE_SIZE * 0.20 * this.zoomLevel, 0, Math.PI*2);
+                this.ctx.fill();
+            }
+        }
+    }
+
+    drawAxes() {
+        if (!this.showAxes) return;
+
+        const axisLen = SPACING * 3.5;
+        const origin = new Vec3(0,0,0);
+        const xEnd = new Vec3(axisLen, 0, 0);
+        const yEnd = new Vec3(0, -axisLen, 0); // World Y is negative of Canvas Y
+        const zEnd = new Vec3(0, 0, axisLen);
+
+        const o2d = this.project(origin);
+        const x2d = this.project(xEnd);
+        const y2d = this.project(yEnd);
+        const z2d = this.project(zEnd);
+
+        // Draw Lines
+        this.ctx.lineWidth = 3;
+
+        this.ctx.strokeStyle = `rgb(${COLORS['p1_color'].join(',')})`;
+        this.ctx.beginPath(); this.ctx.moveTo(o2d.x, o2d.y); this.ctx.lineTo(x2d.x, x2d.y); this.ctx.stroke();
+
+        this.ctx.strokeStyle = "rgb(80, 255, 80)";
+        this.ctx.beginPath(); this.ctx.moveTo(o2d.x, o2d.y); this.ctx.lineTo(y2d.x, y2d.y); this.ctx.stroke();
+
+        this.ctx.strokeStyle = `rgb(${COLORS['p2_color'].join(',')})`;
+        this.ctx.beginPath(); this.ctx.moveTo(o2d.x, o2d.y); this.ctx.lineTo(z2d.x, z2d.y); this.ctx.stroke();
+
+        // Helper for arrowhead
+        function drawArrow(ctx, center, end, color) {
+            const dx = end.x - center.x;
+            const dy = end.y - center.y;
+            const len = Math.sqrt(dx*dx + dy*dy);
+            if (len < 5) return;
+
+            const nx = dx/len, ny = dy/len;
+            const perpX = -ny; const perpY = nx;
+            const headLen = Math.max(10, CUBE_SIZE * 0.4 * this.zoomLevel);
+
+            const base1 = { x: end.x - (nx*headLen + perpX*5), y: end.y - (ny*headLen + perpY*5) };
+            const base2 = { x: end.x - (nx*headLen - perpX*5), y: end.y - (ny*headLen - perpY*5) };
+
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(end.x, end.y);
+            ctx.lineTo(base1.x, base1.y);
+            ctx.lineTo(base2.x, base2.y);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        drawArrow.call(this, this.ctx, o2d, x2d, `rgb(${COLORS['p1_color'].join(',')})`);
+        drawArrow.call(this, this.ctx, o2d, y2d, "rgb(80, 255, 80)");
+        drawArrow.call(this, this.ctx, o2d, z2d, `rgb(${COLORS['p2_color'].join(',')})`);
+
+        // Labels
+        const labelOffset = Math.max(15, CUBE_SIZE * 0.35 * this.zoomLevel);
+        this.ctx.font = `bold ${Math.floor(24 * this.zoomLevel)}px Arial`;
+        this.ctx.fillStyle = "white";
+
+        function drawLabel(ctx, pos, tipPos, text) {
+             const dx = tipPos.x - pos.x;
+             const dy = tipPos.y - pos.y;
+             const len = Math.sqrt(dx*dx + dy*dy);
+             if (len < 1) return;
+             const nx = dx/len, ny = dy/len;
+             const perpX = -ny; const perpY = nx;
+
+             const finalPos = { x: tipPos.x + perpX * labelOffset, y: tipPos.y + perpY * labelOffset };
+             ctx.textAlign = "center";
+             ctx.fillText(text, finalPos.x, finalPos.y);
+        }
+
+        drawLabel.call(this, this.ctx, o2d, x2d, "X");
+        drawLabel.call(this, this.ctx, o2d, y2d, "Y");
+        drawLabel.call(this, this.ctx, o2d, z2d, "Z");
+    }
+
+    drawGuideLines() {
+        const colorStr = `rgba(${COLORS['grid_lines'].slice(0,3).join(',')},${COLORS['grid_lines'][3]/255})`;
+        this.ctx.strokeStyle = colorStr;
+        this.ctx.lineWidth = 1;
+
+        for (const cube of this.cubes) {
+            const pos = cube.pos;
+
+            // X direction
+            if (cube.gridIdx[0] < 3) {
+                const nextPos = new Vec3(pos.x + SPACING, pos.y, pos.z);
+                const p1 = this.project(pos); const p2 = this.project(nextPos);
+                this.ctx.beginPath(); this.ctx.moveTo(p1.x, p1.y); this.ctx.lineTo(p2.x, p2.y); this.ctx.stroke();
+            }
+
+            // Y direction (inverted)
+            if (cube.gridIdx[1] < 3) {
+                const nextPos = new Vec3(pos.x, pos.y - SPACING, pos.z);
+                const p1 = this.project(pos); const p2 = this.project(nextPos);
+                this.ctx.beginPath(); this.ctx.moveTo(p1.x, p1.y); this.ctx.lineTo(p2.x, p2.y); this.ctx.stroke();
+            }
+
+            // Z direction
+            if (cube.gridIdx[2] < 3) {
+                const nextPos = new Vec3(pos.x, pos.y, pos.z + SPACING);
+                const p1 = this.project(pos); const p2 = this.project(nextPos);
+                this.ctx.beginPath(); this.ctx.moveTo(p1.x, p1.y); this.ctx.lineTo(p2.x, p2.y); this.ctx.stroke();
+            }
+        }
+    }
+
+    checkWinCondition(x,y,z) {
+        const p = this.gridState[`${x},${y},${z}`].player;
+        const directions = [
+            [1,0,0], [0,1,0], [0,0,1],
+            [1,1,0], [1,-1,0], [1,0,1], [1,0,-1], [0,1,1], [0,1,-1],
+            [1,1,1], [1,1,-1], [1,-1,1], [1,-1,-1]
+        ];
+
+        for (const [dx,dy,dz] of directions) {
+            let linePoints = [[x,y,z]];
+
+            // Positive
+            let i=1;
+            while(true) {
+                const nx=x+dx*i, ny=y+dy*i, nz=z+dz*i;
+                if (nx>=0 && nx<4 && ny>=0 && ny<4 && nz>=0 && nz<4) {
+                    if (this.gridState[`${nx},${ny},${nz}`]?.player === p) { linePoints.push([nx,ny,nz]); i++; }
+                    else break;
+                } else break;
+            }
+
+            // Negative
+            i=1;
+            while(true) {
+                const nx=x-dx*i, ny=y-dy*i, nz=z-dz*i;
+                if (nx>=0 && nx<4 && ny>=0 && ny<4 && nz>=0 && nz<4) {
+                    if (this.gridState[`${nx},${ny},${nz}`]?.player === p) { linePoints.push([nx,ny,nz]); i++; }
+                    else break;
+                } else break;
+            }
+
+            if (linePoints.length >= 4) {
+                this.winningLineCoords = JSON.parse(JSON.stringify(linePoints.sort()));
+                return p;
+            }
+        }
+        return 0;
+    }
+
+    applyMove(x,y,z) {
+        const key = `${x},${y},${z}`;
+        const playerNum = this.currentPlayer; // 1 or 2
+
+        this.gridState[key] = { player: playerNum };
+
+        const winningPlayer = this.checkWinCondition(x,y,z);
+
+        if (winningPlayer > 0) {
+            this.gameOver = true;
+            this.winner = winningPlayer === 1 ? "Player 1" : (this.mode === 'PvAI' ? "AI" : "Player 2");
+            this.flashTimer = 180;
+
+            // Update Scores
+            if (winningPlayer === 1) this.player1Wins++;
+            else this.player2Wins++;
+
+        } else if (this.checkDrawCondition()) {
+            this.gameOver = true;
+            this.winner = "Draw";
+            this.draws++;
+        } else {
+            this.currentPlayer = this.currentPlayer === 1 ? 2 : 1;
+        }
+
+        // Update UI
+        document.getElementById('p1-score').innerText = `Player 1 (X): ${this.player1Wins} Wins`;
+        document.getElementById('p2-score').innerText = `${this.mode === 'PvAI' ? 'AI (O)' : 'Player 2 (O)'}: ${this.player2Wins} Wins`;
+        document.getElementById('draws-score').innerText = `Draws: ${this.draws}`;
+
+        if (this.gameOver) {
+            const msg = this.winner === "Draw" ? "GAME OVER: IT'S A DRAW!" : `${this.winner} WINS!`;
+            const color = this.winner === "Draw" ? "#fff" : (this.winner.includes("Player 1") ? "rgb(255,80,80)" : "rgb(80,140,255)");
+
+            document.getElementById('message-text').innerText = msg;
+            document.getElementById('message-text').style.color = color;
+            document.getElementById('turn-display').innerText = "";
+        } else {
+             const turnName = this.currentPlayer === 1 ? "Your Turn" : (this.mode === 'PvAI' ? "AI is Thinking..." : `Player ${this.currentPlayer}'s Turn`);
+             document.getElementById('turn-display').innerText = turnName;
+        }
+    }
+
+    resetGame() {
+        this.gridState = {};
+        this.currentPlayer = 1;
+        this.gameOver = false;
+        this.winner = null;
+        this.flashTimer = 0;
+        this.winningLineCoords = [];
+
+        document.getElementById('message-text').innerText = "";
+        document.getElementById('turn-display').innerText = "Your Turn";
+    }
+
+    setupInputs() {
+        // Keyboard
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') this.angleY -= ROTATION_SPEED;
+            else if (e.key === 'ArrowRight') this.angleY += ROTATION_SPEED;
+            else if (e.key === 'ArrowUp') this.angleX -= ROTATION_SPEED;
+            else if (e.key === 'ArrowDown') this.angleX += ROTATION_SPEED;
+
+            // Pan
+            else if (e.key.toLowerCase() === 'a') this.panX -= PAN_SPEED;
+            else if (e.key.toLowerCase() === 'd') this.panX += PAN_SPEED;
+            else if (e.key.toLowerCase() === 'w') this.panY -= PAN_SPEED;
+            else if (e.key.toLowerCase() === 's') this.panY += PAN_SPEED;
+
+            // Zoom
+            else if (e.key.toLowerCase() === 'z') {
+                if (e.shiftKey) this.zoomLevel *= ZOOM_STEP;
+                else this.zoomLevel *= ZOOM_IN_FACTOR;
+            }
+
+            // Mode & View
+            else if (e.key.toLowerCase() === 'm') {
+                this.mode = this.mode === 'PvP' ? 'PvAI' : 'PvP';
+                document.getElementById('mode-display').innerText = this.mode;
+                this.resetGame();
+            }
+            else if (e.key.toLowerCase() === 'v') this.setView('toggle', true);
+            else if ((e.key.toLowerCase() === 'r' || e.key === 'Home')) {
+                // If game over, reset game. Otherwise, reset view.
+                if (this.gameOver) this.resetGame();
+                else this.setView(this.currentView, false);
+            }
+
+            // Axes
+            else if (e.ctrlKey && e.key.toLowerCase() === 'r') {
+                this.showAxes = !this.showAxes;
+            }
+
+            // Limit Zoom
+            this.zoomLevel = Math.max(0.5, Math.min(3.0, this.zoomLevel));
+        });
+
+        // Mouse Click
+        window.addEventListener('mousedown', (e) => {
+            if (e.button === 0 && !this.gameOver && !this.aiThinking) {
+                if (this.currentPlayer === 2 && this.mode === 'PvAI') return;
+
+                const rect = this.canvas.getBoundingClientRect();
+                const mousePos = {
+                    x: e.clientX - rect.left,
+                    y: e.clientY - rect.top
+                };
+
+                let bestDistSq = Infinity;
+                let targetCube = null;
+
+                for (const cube of this.cubes) {
+                    const centerScreen = this.project(cube.pos);
+                    const dx = mousePos.x - centerScreen.x;
+                    const dy = mousePos.y - centerScreen.y;
+                    const distSq = dx*dx + dy*dy;
+
+                    if (distSq < (CUBE_SIZE * 2.5) ** 2 && distSq < bestDistSq) {
+                        bestDistSq = distSq;
+                        targetCube = cube;
+                    }
+                }
+
+                if (targetCube && !this.gridState[targetCube.key]) {
+                    this.applyMove(targetCube.gridIdx[0], targetCube.gridIdx[1], targetCube.gridIdx[2]);
+                }
+            }
+        });
+
+        // Mouse Move (Hover)
+        window.addEventListener('mousemove', (e) => {
+             const rect = this.canvas.getBoundingClientRect();
+             const mousePos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+
+             let bestDistSq = Infinity;
+             let targetCube = null;
+
+             for (const cube of this.cubes) {
+                 const centerScreen = this.project(cube.pos);
+                 const dx = mousePos.x - centerScreen.x;
+                 const dy = mousePos.y - centerScreen.y;
+                 const distSq = dx*dx + dy*dy;
+
+                 if (distSq < (CUBE_SIZE * 2.5) ** 2 && distSq < bestDistSq) {
+                     bestDistSq = distSq;
+                     targetCube = cube;
+                 }
+             }
+
+             this.hoveredCubePos = targetCube ? targetCube.pos : null;
+        });
+
+        // Reset Button
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            this.resetGame();
+        });
+    }
+
+    gameLoop(timestamp) {
+        // Update Logic
+        if (this.gameOver && this.flashTimer > 0) {
+            this.flashTimer--;
+            if (this.flashTimer % 10 === 0) this.flashPhase = !this.flashPhase;
+        }
+
+        if (!this.gameOver && this.mode === 'PvAI' && this.currentPlayer === 2) {
+             // Trigger AI logic here, but handle UI updates inside applyMove
+             // We wrap it to ensure we don't stack calls
+             if (!this.aiThinking) this.makeAiMove();
+        }
+
+        // Rendering
+        // Clear Screen
+        this.ctx.fillStyle = `rgb(${COLORS['bg'].join(',')})`;
+        this.ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+        // Precompute depths
+        const depthMap = {};
+        for (const cube of this.cubes) {
+            const cam = this.getEffectiveCamera();
+            const cy = Math.cos(cam.angleY);
+            const sy = Math.sin(cam.angleY);
+            const cx = Math.cos(cam.angleX);
+            const sx = Math.sin(cam.angleX);
+
+            const x1 = cube.pos.x * cy - cube.pos.z * sy;
+            const z1 = cube.pos.x * sy + cube.pos.z * cy;
+
+            // Python logic had Y flipped in rotation
+            const y2 = (-cube.pos.y) * cx - z1 * sx;
+            const z2 = (-cube.pos.y) * sx + z1 * cx;
+
+            const rangeMin = -SPACING * 1.8;
+            const rangeMax = SPACING * 2.0;
+            let t = (z2 - rangeMin) / (rangeMax - rangeMin);
+            t = Math.max(0, Math.min(1, t));
+
+            depthMap[cube.key] = { z2: z2, depthNorm: t };
+        }
+
+        // Sort Cubes
+        const sortedCubes = [...this.cubes].sort((a, b) => depthMap[b.key].z2 - depthMap[a.key].z2);
+
+        this.drawGuideLines();
+        this.drawAxes();
+
+        for (const cube of sortedCubes) {
+            const pos = cube.pos;
+            const center2d = this.project(pos);
+            const z2 = depthMap[cube.key].z2;
+            const depthNorm = depthMap[cube.key].depthNorm;
+
+            if (this.gridState[cube.key]) {
+                // Draw Piece
+                const state = this.gridState[cube.key];
+                let isWinningCube = false;
+
+                if (this.gameOver && this.flashTimer > 0) {
+                    const gridIdxTuple = JSON.stringify(cube.gridIdx);
+                    const winCoordsSerialized = this.winningLineCoords.map(c => JSON.stringify(c));
+                    if (winCoordsSerialized.includes(gridIdxTuple)) isWinningCube = true;
+                }
+
+                let baseColor = state.player === 1 ? COLORS['p1_color'] : COLORS['p2_color'];
+
+                if (isWinningCube) {
+                    const finalColor = this.flashPhase ? COLORS['flash_active'] : baseColor;
+                    this.drawPlayerPiece(center2d, state.player, finalColor);
+                } else {
+                    // Apply darkening
+                    const df = depthNorm * 0.4;
+                    const r = Math.max(0, Math.floor(baseColor[0] * (1 - df)));
+                    const g = Math.max(0, Math.floor(baseColor[1] * (1 - df)));
+                    const b = Math.max(0, Math.floor(baseColor[2] * (1 - df)));
+
+                    this.drawPlayerPiece(center2d, state.player, [r,g,b]);
+                }
+
+            } else {
+                // Draw Dot
+                const baseDot = COLORS['dot_inactive'];
+                const df = depthNorm * 0.6;
+
+                const r = Math.max(0, Math.floor(baseDot[0] * (1 - df)));
+                const g = Math.max(0, Math.floor(baseDot[1] * (1 - df)));
+                const b = Math.max(0, Math.floor(baseDot[2] * (1 - df)));
+
+                this.ctx.fillStyle = `rgb(${r},${g},${b})`;
+                this.ctx.beginPath();
+                this.ctx.arc(center2d.x, center2d.y, CUBE_SIZE * 0.20 * this.zoomLevel, 0, Math.PI*2);
+                this.ctx.fill();
+            }
+        }
+
+        // Draw Ghost (Hover)
+        if (!this.gameOver && !this.aiThinking) {
+             let hoverCube = null;
+
+             for (const cube of sortedCubes) {
+                 if (this.hoveredCubePos &&
+                     Math.abs(this.hoveredCubePos.x - cube.pos.x) < 0.1 &&
+                     Math.abs(this.hoveredCubePos.y - cube.pos.y) < 0.1 &&
+                     Math.abs(this.hoveredCubePos.z - cube.pos.z) < 0.1) {
+                         hoverCube = cube;
+                         break;
+                 }
+             }
+
+             if (hoverCube) {
+                 const center2d = this.project(hoverCube.pos);
+                 const depthNorm = depthMap[hoverCube.key].depthNorm;
+
+                 let ghostColor = COLORS['ghost_color'];
+                 // Darken
+                 const r = Math.max(0, Math.floor(ghostColor[0] * (1 - depthNorm * 0.2)));
+                 const g = Math.max(0, Math.floor(ghostColor[1] * (1 - depthNorm * 0.2)));
+                 const b = Math.max(0, Math.floor(ghostColor[2] * (1 - depthNorm * 0.2)));
+
+                 this.ctx.fillStyle = `rgba(${r},${g},${b}, ${0.7 + 0.3 * (1-depthNorm)})`;
+
+                 const baseSize = Math.floor(CUBE_SIZE * 0.85 * this.zoomLevel);
+                 const fontSize = Math.max(32, baseSize);
+                 this.ctx.font = `bold ${fontSize}px Arial`;
+                 this.ctx.textAlign = 'center';
+                 this.ctx.textBaseline = 'middle';
+
+                 const char = this.currentPlayer === 1 ? 'X' : 'O';
+                 this.ctx.fillText(char, center2d.x, center2d.y);
+             }
+        }
+
+        requestAnimationFrame((t) => this.gameLoop(t));
+    }
+}
+
+// Initialize Game
+window.onload = () => {
+    const game = new CubeViewer();
+};
+
+</script>
+</body>
+</html>
