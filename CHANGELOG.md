@@ -11,6 +11,7 @@ All notable changes to the project will be documented in this file.
  - Changed order of events in JS so that Ctrl+r is dealt with before the r key
  - Invert Y Axis
  - Add copyright footer
+ - Change initial mode to PvAI
 
 ## [0.17] - 2026-05-29
 ### Changed

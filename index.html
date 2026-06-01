@@ -123,7 +123,7 @@
                 V : Toggle View (Math / Isometric)<br>
                 Ctrl+R : Toggle Axes<br>
                 <br>
-                Current Mode: <span id="mode-display" class="highlight">PvP</span><br>
+                Current Mode: <span id="mode-display" class="highlight">PvAI</span><br>
                 M : Switch Mode
             </div>
         </div>
@@ -203,7 +203,14 @@ class CubeViewer {
         window.addEventListener('resize', () => this.resize());
 
         // Game State
-        this.mode = 'PvP';
+        this.mode = 'PvAI';
+        document.getElementById('mode-display').innerText = this.mode;
+
+        // Add these lines to initialize the scoreboard properly:
+        document.getElementById('p1-score').innerText = `Player 1 (X): 0 Wins`;
+        document.getElementById('p2-score').innerText = `AI (O): 0 Wins`;
+        document.getElementById('draws-score').innerText = `Draws: 0`;
+
         this.currentPlayer = 1;
         this.gridState = {}; // Key: "x,y,z", Value: {player: int}
         this.player1Wins = 0;
@@ -913,6 +920,10 @@ class CubeViewer {
 
         document.getElementById('message-text').innerText = "";
         document.getElementById('turn-display').innerText = "Your Turn";
+        // Update scoreboard display
+        document.getElementById('p1-score').innerText = `Player 1 (X): ${this.player1Wins} Wins`;
+        document.getElementById('p2-score').innerText = `${this.mode === 'PvAI' ? 'AI (O)' : 'Player 2 (O)'}: ${this.player2Wins} Wins`;
+        document.getElementById('draws-score').innerText = `Draws: ${this.draws}`;
     }
 
     setupInputs() {
@@ -947,6 +958,10 @@ class CubeViewer {
             else if (e.key.toLowerCase() === 'm') {
                 this.mode = this.mode === 'PvP' ? 'PvAI' : 'PvP';
                 document.getElementById('mode-display').innerText = this.mode;
+                // Update scoreboard display when switching modes
+                document.getElementById('p1-score').innerText = `Player 1 (X): ${this.player1Wins} Wins`;
+                document.getElementById('p2-score').innerText = `${this.mode === 'PvAI' ? 'AI (O)' : 'Player 2 (O)'}: ${this.player2Wins} Wins`;
+                document.getElementById('draws-score').innerText = `Draws: ${this.draws}`;
                 this.resetGame();
             }
             else if (e.key.toLowerCase() === 'v') this.setView('toggle', true);
@@ -1169,7 +1184,7 @@ window.onload = () => {
 
 <div id="footer" style="text-align: center">
     <p>
-        &copy SadSack963 <a href="https://github.com/SadSack963/Qubik">Qubik</a>
+        &copy 2026 SadSack963 <a href="https://github.com/SadSack963/Qubik">Qubik</a>
     </p>
 </div>
 
