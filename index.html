@@ -519,9 +519,9 @@ class CubeViewer {
         const x1 = point.x * cy - point.z * sy;
         const z1 = point.x * sy + point.z * cy;
 
-        // Flip Y to match canvas coordinates (Up is negative Y)
-        const y2 = (-point.y) * cx - z1 * sx;
-        const z2 = (-point.y) * sx + z1 * cx;
+        // Invert Y axis (standard 3D convention)
+        const y2 = point.y * cx - z1 * sx;
+        const z2 = point.y * sx + z1 * cx;
 
         const isoX = (x1 - z2) * Math.cos(Math.PI / 6); // cos(30deg)
         const isoY = (x1 + z2) * Math.sin(Math.PI / 6) - y2; // sin(30deg)
