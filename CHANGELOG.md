@@ -9,6 +9,8 @@ All notable changes to the project will be documented in this file.
 ### Changed
  - Added docstrings and type hints
  - Changed order of events in JS so that Ctrl+r is dealt with before the r key
+ - Invert Y Axis
+ - Add copyright footer
 
 ## [0.17] - 2026-05-29
 ### Changed
